@@ -106,7 +106,9 @@ test("le classement est lisible sans compte", async () => {
   expect(standings).toHaveLength(2);
 });
 
-test("aucune query publique ne renvoie de nom de joueur", async () => {
+test("les listes publiques ne renvoient pas de nom de joueur", async () => {
+  // La feuille d'un match terminé est la seule exception, délibérée (ADR-0004) : elle est
+  // couverte par ses propres tests plus bas. Les listes, elles, restent anonymes.
   const t = convexTest(schema, modules);
   const { s, rosters } = await completedMatch(t);
   const playerName = await t.run(async (ctx) => {
@@ -353,5 +355,107 @@ test("l'avancement de chaque championnat de la saison courante est chiffré", as
       confirmed: 0,
       disputed: 0,
     },
+  ]);
+});
+
+test("la feuille d'un match terminé est lisible sans compte, sets et noms compris", async () => {
+  const t = convexTest(schema, modules);
+  const { s, rosters } = await completedMatch(t);
+  const firstName = await t.run(async (ctx) => {
+    const player = await ctx.db.get(rosters.home[0]);
+    return player === null ? "" : `${player.firstName} ${player.lastName}`;
+  });
+
+  // Aucun `withIdentity` : c'est bien la lecture d'un visiteur anonyme.
+  const sheet = await t.query(api.sheets.publicResult, { matchId: s.matchId });
+
+  expect(sheet?.sets).toEqual(VALID_SETS);
+  expect(sheet?.isForfeit).toBe(false);
+  expect(sheet?.homeLineup).toHaveLength(6);
+  expect(sheet?.homeLineup.map((player) => player.name)).toContain(firstName);
+  expect(sheet?.awayLineup).toHaveLength(6);
+});
+
+test("la feuille d'un match non terminé n'est pas publique", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(SLOT_AT - 7 * 86_400_000));
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+  const rosters = await seedBothRosters(t, s);
+  await forceConfirmed(t, { matchId: s.matchId, proposedBy: s.homeManager });
+
+  // Créneau confirmé, match pas encore joué.
+  expect(await t.query(api.sheets.publicResult, { matchId: s.matchId })).toBeNull();
+
+  // Feuille saisie mais pas encore validée : le score peut encore changer.
+  vi.setSystemTime(new Date(SLOT_AT + 3_600_000));
+  await t.withIdentity({ subject: s.homeManager }).mutation(api.sheets.submit, {
+    matchId: s.matchId,
+    sets: VALID_SETS,
+    homeLineup: rosters.home.slice(0, 6),
+    awayLineup: rosters.away.slice(0, 6),
+  });
+  expect(await t.query(api.sheets.publicResult, { matchId: s.matchId })).toBeNull();
+
+  // Contestée : encore moins.
+  await t.withIdentity({ subject: s.awayManager }).mutation(api.sheets.dispute, {
+    matchId: s.matchId,
+    reason: "Score faux.",
+  });
+  expect(await t.query(api.sheets.publicResult, { matchId: s.matchId })).toBeNull();
+
+  // Une fois le litige tranché, elle devient publique.
+  await t.withIdentity({ subject: s.admin }).mutation(api.sheets.settleDispute, {
+    matchId: s.matchId,
+    sets: VALID_SETS,
+  });
+  expect(await t.query(api.sheets.publicResult, { matchId: s.matchId })).not.toBeNull();
+});
+
+test("la feuille publique ne dit rien du déroulé administratif", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(SLOT_AT - 7 * 86_400_000));
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+  const rosters = await seedBothRosters(t, s);
+  await forceConfirmed(t, { matchId: s.matchId, proposedBy: s.homeManager });
+  vi.setSystemTime(new Date(SLOT_AT + 3_600_000));
+  await t.withIdentity({ subject: s.homeManager }).mutation(api.sheets.submit, {
+    matchId: s.matchId,
+    sets: VALID_SETS,
+    homeLineup: rosters.home.slice(0, 6),
+    awayLineup: rosters.away.slice(0, 6),
+  });
+  await t.withIdentity({ subject: s.awayManager }).mutation(api.sheets.dispute, {
+    matchId: s.matchId,
+    reason: "Le troisième set s'est terminé 25-27.",
+  });
+  await t
+    .withIdentity({ subject: s.admin })
+    .mutation(api.sheets.settleDispute, { matchId: s.matchId, sets: VALID_SETS });
+
+  const payload = JSON.stringify(
+    await t.query(api.sheets.publicResult, { matchId: s.matchId }),
+  );
+  expect(payload).not.toContain("25-27");
+  expect(payload).not.toContain("submittedBy");
+  expect(payload).not.toContain("deadline");
+});
+
+test("un forfait est publié sans composition", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(SLOT_AT - 7 * 86_400_000));
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+  await t
+    .withIdentity({ subject: s.admin })
+    .mutation(api.sheets.forfeit, { matchId: s.matchId, forfeitingTeamId: s.awayTeamId });
+
+  const sheet = await t.query(api.sheets.publicResult, { matchId: s.matchId });
+  expect(sheet).toMatchObject({ isForfeit: true, homeLineup: [], awayLineup: [] });
+  expect(sheet?.sets).toEqual([
+    { home: 25, away: 0 },
+    { home: 25, away: 0 },
+    { home: 25, away: 0 },
   ]);
 });

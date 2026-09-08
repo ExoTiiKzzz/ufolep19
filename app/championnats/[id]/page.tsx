@@ -1,19 +1,11 @@
 "use client";
 
 import { useQuery } from "convex/react";
-import Link from "next/link";
 import { useParams } from "next/navigation";
 
 import { MatchRow } from "@/components/match-row";
+import { StandingsTable } from "@/components/standings-table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { formatWindow } from "@/lib/format";
@@ -42,46 +34,11 @@ export default function ChampionshipPage() {
           <CardTitle>Classement</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>#</TableHead>
-                <TableHead>Équipe</TableHead>
-                <TableHead className="text-right">J</TableHead>
-                <TableHead className="text-right">V</TableHead>
-                <TableHead className="text-right">D</TableHead>
-                <TableHead className="text-right">Sets</TableHead>
-                <TableHead className="text-right">Points marqués</TableHead>
-                <TableHead className="text-right">Pts</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(standings ?? []).map((row) => (
-                <TableRow key={row.teamId}>
-                  <TableCell className="text-muted-foreground">{row.rank}</TableCell>
-                  <TableCell className="font-medium">
-                    <Link href={`/equipes/${row.teamId}`} className="hover:underline">
-                      {row.teamName}
-                    </Link>
-                    <span className="text-muted-foreground"> · {row.clubName}</span>
-                  </TableCell>
-                  <TableCell className="text-right">{row.played}</TableCell>
-                  <TableCell className="text-right">{row.wins}</TableCell>
-                  <TableCell className="text-right">{row.losses}</TableCell>
-                  <TableCell className="text-right">
-                    {row.setsWon} / {row.setsLost}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {row.pointsFor} / {row.pointsAgainst}
-                  </TableCell>
-                  <TableCell className="text-right font-semibold">{row.points}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          {(standings ?? []).length === 0 ? (
-            <p className="text-muted-foreground text-sm">Aucune équipe engagée.</p>
-          ) : null}
+          {standings === undefined ? (
+            <p className="text-muted-foreground text-sm">Chargement…</p>
+          ) : (
+            <StandingsTable rows={standings} />
+          )}
         </CardContent>
       </Card>
 

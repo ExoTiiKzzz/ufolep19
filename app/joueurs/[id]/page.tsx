@@ -68,7 +68,7 @@ export default function PlayerPage() {
           ) : (
             player.teams.map((team) => (
               <Link key={team._id} href={`/equipes/${team._id}`}>
-                <Badge variant={team.isCurrentSeason ? "default" : "secondary"}>
+                <Badge variant={team.isCurrentSeason ? "default" : "muted"}>
                   {team.name} · {team.seasonLabel}
                 </Badge>
               </Link>

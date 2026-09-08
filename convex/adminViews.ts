@@ -3,7 +3,7 @@ import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { query } from "./_generated/server";
 import { requireAdmin } from "./authz";
-import { matchSummary, summarize } from "./matches";
+import { matchSummary, newTeamCache, summarize } from "./matches";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -35,6 +35,7 @@ export const overdueSlots = query({
         .collect()),
     ];
 
+    const cache = newTeamCache();
     const rows = [];
     for (const match of pending) {
       const matchday = await ctx.db.get(match.matchdayId);
@@ -55,7 +56,7 @@ export const overdueSlots = query({
         }
       }
       rows.push({
-        match: await summarize(ctx, match),
+        match: await summarize(ctx, match, cache),
         windowClosed: matchday.windowEnd < now,
         managers,
       });
@@ -80,6 +81,7 @@ export const stalled = query({
   handler: async (ctx) => {
     await requireAdmin(ctx);
     const now = Date.now();
+    const cache = newTeamCache();
     const rows = [];
 
     for (const match of await ctx.db
@@ -87,20 +89,26 @@ export const stalled = query({
       .withIndex("by_state", (q) => q.eq("state", "confirmed"))
       .collect()) {
       if (match.slot !== undefined && match.slot.at < now) {
-        rows.push({ match: await summarize(ctx, match), reason: "sheetMissing" as const });
+        rows.push({
+          match: await summarize(ctx, match, cache),
+          reason: "sheetMissing" as const,
+        });
       }
     }
     for (const match of await ctx.db
       .query("matches")
       .withIndex("by_state", (q) => q.eq("state", "awaitingSheet"))
       .collect()) {
-      rows.push({ match: await summarize(ctx, match), reason: "sheetPending" as const });
+      rows.push({
+        match: await summarize(ctx, match, cache),
+        reason: "sheetPending" as const,
+      });
     }
     for (const match of await ctx.db
       .query("matches")
       .withIndex("by_state", (q) => q.eq("state", "disputed"))
       .collect()) {
-      rows.push({ match: await summarize(ctx, match), reason: "disputed" as const });
+      rows.push({ match: await summarize(ctx, match, cache), reason: "disputed" as const });
     }
     return rows;
   },

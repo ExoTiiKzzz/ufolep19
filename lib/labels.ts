@@ -10,14 +10,20 @@ export const matchStateLabels: Record<MatchState, string> = {
   completed: "Terminé",
 };
 
-/** Ton du badge selon l'état : neutre, en attente, ou problème. */
-export const matchStateVariant: Record<MatchState, "default" | "secondary" | "outline"> = {
+/**
+ * Ton du badge selon l'état. La couleur porte un sens : bleu pour un état acquis, abricot
+ * pour une attente, rose pour un problème, gris pour du neutre.
+ */
+export const matchStateVariant: Record<
+  MatchState,
+  "default" | "secondary" | "destructive" | "muted" | "outline"
+> = {
   planned: "outline",
   awaitingSlot: "secondary",
   confirmed: "default",
   awaitingSheet: "secondary",
-  disputed: "default",
-  completed: "outline",
+  disputed: "destructive",
+  completed: "muted",
 };
 
 export const todoLabels = {
@@ -49,4 +55,11 @@ export const stalledReasonLabels = {
   sheetMissing: "Feuille non saisie après la date du match",
   sheetPending: "Feuille en attente de validation",
   disputed: "Litige à trancher",
+} as const;
+
+/** Comment annoncer la journée mise en avant sur la page d'accueil. */
+export const matchdayStatusLabels = {
+  current: "Journée en cours",
+  upcoming: "Prochaine journée",
+  past: "Dernière journée",
 } as const;

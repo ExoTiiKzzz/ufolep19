@@ -71,6 +71,8 @@ export default defineSchema({
   clubs: defineTable({
     name: v.string(),
     defaultVenue: v.string(),
+    // Logo du club, stocké dans le File Storage de Convex. Facultatif.
+    logoId: v.optional(v.id("_storage")),
   }).index("by_name", ["name"]),
 
   // Joueur : fiche d'un licencié, rattachée à un club. Traverse les saisons. Existe sans

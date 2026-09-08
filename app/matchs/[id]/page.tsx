@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 
+import { ClubLogo } from "@/components/club-logo";
+import { SetsTable } from "@/components/sets-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -37,6 +39,8 @@ export default function MatchPage() {
   // `history` échoue pour qui n'est pas concerné : on ne l'interroge qu'avec un compte.
   const history = useQuery(api.negotiation.history, account ? { matchId } : "skip");
   const sheet = useQuery(api.sheets.get, account ? { matchId } : "skip");
+  // Feuille d'un match terminé : score par set et compositions, lisibles sans compte.
+  const publicSheet = useQuery(api.sheets.publicResult, { matchId });
   const homeRoster = useQuery(
     api.roster.listByTeam,
     account && match ? { teamId: match.homeTeamId } : "skip",
@@ -99,11 +103,13 @@ export default function MatchPage() {
       <p className="text-muted-foreground text-sm">
         Journée {match.matchdayNumber} · {formatWindow(match.windowStart, match.windowEnd)}
       </p>
-      <h1 className="text-2xl font-semibold tracking-tight">
+      <h1 className="flex flex-wrap items-center gap-3 text-2xl font-semibold tracking-tight">
+        <ClubLogo name={match.homeClubName} logoUrl={match.homeClubLogoUrl} size={36} />
         <Link href={`/equipes/${match.homeTeamId}`} className="hover:underline">
           {match.homeTeamName}
         </Link>
-        <span className="text-muted-foreground"> — </span>
+        <span className="text-muted-foreground">—</span>
+        <ClubLogo name={match.awayClubName} logoUrl={match.awayClubLogoUrl} size={36} />
         <Link href={`/equipes/${match.awayTeamId}`} className="hover:underline">
           {match.awayTeamName}
         </Link>
@@ -127,6 +133,33 @@ export default function MatchPage() {
 
       {error === null ? null : <p className="mt-4 text-sm text-red-600">{error}</p>}
       {notice === null ? null : <p className="mt-4 text-sm text-green-700">{notice}</p>}
+
+      {publicSheet === undefined || publicSheet === null ? null : (
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle className="text-base">Feuille de match</CardTitle>
+            {publicSheet.isForfeit ? <CardDescription>Forfait</CardDescription> : null}
+          </CardHeader>
+          <CardContent className="flex flex-col gap-6">
+            <SetsTable
+              homeTeamName={match.homeTeamName}
+              awayTeamName={match.awayTeamName}
+              sets={publicSheet.sets}
+            />
+            {publicSheet.homeLineup.length === 0 && publicSheet.awayLineup.length === 0 ? (
+              <p className="text-muted-foreground text-sm">
+                Aucune composition : le match ne s&apos;est pas joué.
+              </p>
+            ) : (
+              <LineupSummary
+                homeTeamName={match.homeTeamName}
+                awayTeamName={match.awayTeamName}
+                sheet={publicSheet}
+              />
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {history === undefined ? null : (
         <>
@@ -429,15 +462,17 @@ export default function MatchPage() {
               <CardHeader>
                 <CardTitle className="text-base">Feuille à valider</CardTitle>
                 <CardDescription>
-                  {sheet.sets
-                    .map((set) => `${set.home}-${set.away}`)
-                    .join(" · ")}
                   {sheet.deadline === null
-                    ? ""
-                    : ` — validation tacite ${formatCountdown(sheet.deadline)}`}
+                    ? "Votre validation est requise."
+                    : `Validation tacite ${formatCountdown(sheet.deadline)}.`}
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-4">
+                <SetsTable
+                  homeTeamName={match.homeTeamName}
+                  awayTeamName={match.awayTeamName}
+                  sets={sheet.sets}
+                />
                 <LineupSummary
                   homeTeamName={match.homeTeamName}
                   awayTeamName={match.awayTeamName}
@@ -489,11 +524,15 @@ export default function MatchPage() {
               <CardHeader>
                 <CardTitle className="text-base">Arbitrer le litige</CardTitle>
                 <CardDescription>
-                  Motif de la contestation : « {sheet.disputeReason ?? "non précisé"} ». Score
-                  saisi : {sheet.sets.map((set) => `${set.home}-${set.away}`).join(" · ")}.
+                  Motif de la contestation : « {sheet.disputeReason ?? "non précisé"} ».
                 </CardDescription>
               </CardHeader>
-              <CardContent className="flex flex-col gap-3">
+              <CardContent className="flex flex-col gap-4">
+                <SetsTable
+                  homeTeamName={match.homeTeamName}
+                  awayTeamName={match.awayTeamName}
+                  sets={sheet.sets}
+                />
                 <div className="flex flex-col gap-2">
                   {sets.map((set, index) => (
                     <div key={index} className="flex items-center gap-2">
@@ -576,24 +615,6 @@ export default function MatchPage() {
                 >
                   Forfait de {match.awayTeamName}
                 </Button>
-              </CardContent>
-            </Card>
-          ) : null}
-
-          {sheet !== undefined && sheet !== null && match.state === "completed" ? (
-            <Card className="mt-6">
-              <CardHeader>
-                <CardTitle className="text-base">Feuille de match</CardTitle>
-                <CardDescription>
-                  {sheet.sets.map((set) => `${set.home}-${set.away}`).join(" · ")}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <LineupSummary
-                  homeTeamName={match.homeTeamName}
-                  awayTeamName={match.awayTeamName}
-                  sheet={sheet}
-                />
               </CardContent>
             </Card>
           ) : null}

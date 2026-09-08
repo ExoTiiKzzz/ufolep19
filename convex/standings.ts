@@ -16,6 +16,7 @@ export const byChampionship = query({
       teamId: v.id("teams"),
       teamName: v.string(),
       clubName: v.string(),
+      clubLogoUrl: v.union(v.string(), v.null()),
       rank: v.number(),
       played: v.number(),
       wins: v.number(),
@@ -58,10 +59,18 @@ export const byChampionship = query({
       teams.map((team) => team._id),
       outcomes,
     );
-    const clubNames = new Map<string, string>();
+    // Un club engage parfois plusieurs équipes : on ne le relit qu'une fois.
+    const clubs = new Map<string, { name: string; logoUrl: string | null }>();
     for (const team of teams) {
-      if (!clubNames.has(team.clubId)) {
-        clubNames.set(team.clubId, (await ctx.db.get(team.clubId))?.name ?? "");
+      if (!clubs.has(team.clubId)) {
+        const club = await ctx.db.get(team.clubId);
+        clubs.set(team.clubId, {
+          name: club?.name ?? "",
+          logoUrl:
+            club === null || club.logoId === undefined
+              ? null
+              : await ctx.storage.getUrl(club.logoId),
+        });
       }
     }
     const teamsById = new Map(teams.map((team) => [String(team._id), team]));
@@ -72,7 +81,8 @@ export const byChampionship = query({
         ...row,
         teamId: row.teamId as typeof teams[number]["_id"],
         teamName: team?.name ?? "",
-        clubName: team === undefined ? "" : (clubNames.get(team.clubId) ?? ""),
+        clubName: team === undefined ? "" : (clubs.get(team.clubId)?.name ?? ""),
+        clubLogoUrl: team === undefined ? null : (clubs.get(team.clubId)?.logoUrl ?? null),
       };
     });
   },

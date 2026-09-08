@@ -2,7 +2,7 @@ import { ConvexError, v } from "convex/values";
 
 import { mutation, query } from "./_generated/server";
 import { requireManagerOfClub, requireUser } from "./authz";
-import { matchSummary, summarize } from "./matches";
+import { matchSummary, newTeamCache, summarize } from "./matches";
 
 const player = v.object({
   _id: v.id("players"),
@@ -121,6 +121,7 @@ export const get = query({
       .query("lineupEntries")
       .withIndex("by_player_and_matchday", (q) => q.eq("playerId", playerId))
       .collect();
+    const cache = newTeamCache();
     const appearances = await Promise.all(
       lineups.map(async (entry) => {
         const match = await ctx.db.get(entry.matchId);
@@ -128,7 +129,7 @@ export const get = query({
           return null;
         }
         const team = await ctx.db.get(entry.teamId);
-        return { match: await summarize(ctx, match), teamName: team?.name ?? "" };
+        return { match: await summarize(ctx, match, cache), teamName: team?.name ?? "" };
       }),
     );
 

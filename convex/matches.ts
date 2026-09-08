@@ -16,18 +16,62 @@ export const matchSummary = v.object({
   awayTeamId: v.id("teams"),
   homeTeamName: v.string(),
   awayTeamName: v.string(),
+  homeClubName: v.string(),
+  awayClubName: v.string(),
+  homeClubLogoUrl: v.union(v.string(), v.null()),
+  awayClubLogoUrl: v.union(v.string(), v.null()),
   state: matchState,
   slot: v.optional(slot),
   result: v.optional(matchResult),
   forfeitAgainst: v.optional(v.id("teams")),
 });
 
-/** Enrichit un match de ce qu'il faut pour l'afficher sans requête supplémentaire. */
-export async function summarize(ctx: QueryCtx, match: Doc<"matches">) {
-  const [matchday, homeTeam, awayTeam] = await Promise.all([
+/**
+ * Mémoire d'une seule requête, pour ne pas relire la même équipe et le même club à chaque
+ * match. Un calendrier complet résoudrait sinon deux logos par match.
+ */
+export type TeamCache = Map<
+  Id<"teams">,
+  { teamName: string; clubName: string; clubLogoUrl: string | null }
+>;
+
+export function newTeamCache(): TeamCache {
+  return new Map();
+}
+
+async function presentTeam(ctx: QueryCtx, teamId: Id<"teams">, cache: TeamCache) {
+  const known = cache.get(teamId);
+  if (known !== undefined) {
+    return known;
+  }
+  const team = await ctx.db.get(teamId);
+  const club = team === null ? null : await ctx.db.get(team.clubId);
+  const presentation = {
+    teamName: team?.name ?? "",
+    clubName: club?.name ?? "",
+    clubLogoUrl:
+      club === null || club.logoId === undefined
+        ? null
+        : await ctx.storage.getUrl(club.logoId),
+  };
+  cache.set(teamId, presentation);
+  return presentation;
+}
+
+/**
+ * Enrichit un match de ce qu'il faut pour l'afficher sans requête supplémentaire.
+ *
+ * Passez le **même** `cache` sur toute une liste de matchs : les équipes s'y répètent.
+ */
+export async function summarize(
+  ctx: QueryCtx,
+  match: Doc<"matches">,
+  cache: TeamCache = newTeamCache(),
+) {
+  const [matchday, home, away] = await Promise.all([
     ctx.db.get(match.matchdayId),
-    ctx.db.get(match.homeTeamId),
-    ctx.db.get(match.awayTeamId),
+    presentTeam(ctx, match.homeTeamId, cache),
+    presentTeam(ctx, match.awayTeamId, cache),
   ]);
   return {
     _id: match._id,
@@ -38,8 +82,12 @@ export async function summarize(ctx: QueryCtx, match: Doc<"matches">) {
     windowEnd: matchday?.windowEnd ?? 0,
     homeTeamId: match.homeTeamId,
     awayTeamId: match.awayTeamId,
-    homeTeamName: homeTeam?.name ?? "",
-    awayTeamName: awayTeam?.name ?? "",
+    homeTeamName: home.teamName,
+    awayTeamName: away.teamName,
+    homeClubName: home.clubName,
+    awayClubName: away.clubName,
+    homeClubLogoUrl: home.clubLogoUrl,
+    awayClubLogoUrl: away.clubLogoUrl,
     state: match.state,
     slot: match.slot,
     result: match.result,
@@ -56,7 +104,10 @@ export const listByChampionship = query({
       .query("matches")
       .withIndex("by_championship", (q) => q.eq("championshipId", championshipId))
       .collect();
-    const summaries = await Promise.all(matches.map((match) => summarize(ctx, match)));
+    const cache = newTeamCache();
+    const summaries = await Promise.all(
+      matches.map((match) => summarize(ctx, match, cache)),
+    );
     return summaries.sort(
       (a, b) => a.matchdayNumber - b.matchdayNumber || (a.slot?.at ?? 0) - (b.slot?.at ?? 0),
     );
@@ -234,6 +285,7 @@ export const myTodo = query({
 
     const now = Date.now();
     const managed = new Set(teamIds.map(String));
+    const cache = newTeamCache();
     const todo = [];
 
     for (const match of matches) {
@@ -292,7 +344,7 @@ export const myTodo = query({
       if (!iAmHome && !iAmAway) {
         continue;
       }
-      todo.push({ match: await summarize(ctx, match), action, deadline });
+      todo.push({ match: await summarize(ctx, match, cache), action, deadline });
     }
 
     const priority = {

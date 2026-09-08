@@ -148,7 +148,7 @@ export default function AccountsPage() {
                   <TableCell>
                     <div className="flex flex-wrap items-center gap-2">
                       {row.managedTeams.map((team) => (
-                        <Badge key={team._id} variant="secondary">
+                        <Badge key={team._id} variant="muted">
                           {team.name}
                           <button
                             type="button"

@@ -60,3 +60,47 @@ export const create = mutation({
     return await ctx.db.insert("championships", { seasonId: args.seasonId, name });
   },
 });
+
+/**
+ * Tous les championnats, avec leur saison, la saison courante en tête.
+ *
+ * Sert au sélecteur de la page d'accueil : les saisons passées restent atteignables sans
+ * quitter la page. Lecture publique.
+ */
+export const listAll = query({
+  args: {},
+  returns: v.array(
+    v.object({
+      _id: v.id("championships"),
+      name: v.string(),
+      seasonId: v.id("seasons"),
+      seasonLabel: v.string(),
+      isCurrentSeason: v.boolean(),
+    }),
+  ),
+  handler: async (ctx) => {
+    const seasons = await ctx.db.query("seasons").withIndex("by_label").order("desc").collect();
+    const rows = [];
+    for (const season of seasons) {
+      const championships = await ctx.db
+        .query("championships")
+        .withIndex("by_season", (q) => q.eq("seasonId", season._id))
+        .collect();
+      for (const championship of championships) {
+        rows.push({
+          _id: championship._id,
+          name: championship.name,
+          seasonId: season._id,
+          seasonLabel: season.label,
+          isCurrentSeason: season.isCurrent,
+        });
+      }
+    }
+    return rows.sort(
+      (a, b) =>
+        Number(b.isCurrentSeason) - Number(a.isCurrentSeason) ||
+        b.seasonLabel.localeCompare(a.seasonLabel) ||
+        a.name.localeCompare(b.name, "fr"),
+    );
+  },
+});

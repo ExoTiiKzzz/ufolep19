@@ -1,7 +1,7 @@
 import { ConvexError, v } from "convex/values";
 
 import { mutation, query } from "./_generated/server";
-import { matchSummary, summarize } from "./matches";
+import { matchSummary, newTeamCache, summarize } from "./matches";
 import { managedTeamIds, requireAdmin, requireUser } from "./authz";
 
 const team = v.object({
@@ -181,6 +181,7 @@ export const get = query({
       clubId: v.id("clubs"),
       clubName: v.string(),
       clubVenue: v.string(),
+      clubLogoUrl: v.union(v.string(), v.null()),
       championshipId: v.id("championships"),
       championshipName: v.string(),
       seasonId: v.id("seasons"),
@@ -205,6 +206,8 @@ export const get = query({
       clubId: team.clubId,
       clubName: club?.name ?? "",
       clubVenue: club?.defaultVenue ?? "",
+      clubLogoUrl:
+        club?.logoId === undefined ? null : await ctx.storage.getUrl(club.logoId),
       championshipId: team.championshipId,
       championshipName: championship?.name ?? "",
       seasonId: team.seasonId,
@@ -229,8 +232,9 @@ export const matches = query({
         .withIndex("by_away_team", (q) => q.eq("awayTeamId", teamId))
         .collect(),
     ]);
+    const cache = newTeamCache();
     const summaries = await Promise.all(
-      [...asHome, ...asAway].map((match) => summarize(ctx, match)),
+      [...asHome, ...asAway].map((match) => summarize(ctx, match, cache)),
     );
     return summaries.sort(
       (a, b) => a.matchdayNumber - b.matchdayNumber || (a.slot?.at ?? 0) - (b.slot?.at ?? 0),

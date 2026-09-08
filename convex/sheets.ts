@@ -445,3 +445,67 @@ export const get = query({
     };
   },
 });
+
+/**
+ * Score set par set et compositions d'un match **terminé**, en lecture publique.
+ *
+ * C'est la seule query publique qui renvoie des noms de personnes physiques : décision
+ * assumée, voir [ADR-0004](../docs/adr/0004-feuilles-de-match-publiques.md).
+ *
+ * Deux restrictions volontaires :
+ *
+ * - seul un match terminé est exposé — publier un score encore en attente de validation ou
+ *   contesté afficherait un résultat susceptible de changer ;
+ * - rien du déroulé administratif ne sort ici (motif de contestation, auteur de la saisie,
+ *   échéance) : ça reste réservé aux responsables via `sheets.get`.
+ */
+export const publicResult = query({
+  args: { matchId: v.id("matches") },
+  returns: v.union(
+    v.object({
+      sets: v.array(setScore),
+      isForfeit: v.boolean(),
+      homeLineup: v.array(v.object({ _id: v.id("players"), name: v.string() })),
+      awayLineup: v.array(v.object({ _id: v.id("players"), name: v.string() })),
+    }),
+    v.null(),
+  ),
+  handler: async (ctx, { matchId }) => {
+    const match = await ctx.db.get(matchId);
+    if (match === null || match.state !== "completed") {
+      return null;
+    }
+    const sheet = await sheetOf(ctx, matchId);
+    if (sheet === null || sheet.status !== "validated") {
+      return null;
+    }
+
+    const entries = await ctx.db
+      .query("lineupEntries")
+      .withIndex("by_match", (q) => q.eq("matchId", matchId))
+      .collect();
+    const named = await Promise.all(
+      entries.map(async (entry) => {
+        const player = await ctx.db.get(entry.playerId);
+        return {
+          teamId: entry.teamId,
+          _id: entry.playerId,
+          name:
+            player === null ? "Joueur supprimé" : `${player.firstName} ${player.lastName}`,
+        };
+      }),
+    );
+    const forTeam = (teamId: Id<"teams">) =>
+      named
+        .filter((entry) => entry.teamId === teamId)
+        .map(({ _id, name }) => ({ _id, name }))
+        .sort((a, b) => a.name.localeCompare(b.name, "fr"));
+
+    return {
+      sets: sheet.sets,
+      isForfeit: match.forfeitAgainst !== undefined,
+      homeLineup: forTeam(match.homeTeamId),
+      awayLineup: forTeam(match.awayTeamId),
+    };
+  },
+});

@@ -197,8 +197,9 @@ personne qui détient l'information.
     hiérarchie du moment.
 65. En tant que spectateur, je veux voir les équipes ex aequo affichées comme telles, afin de ne pas
     croire à un écart qui n'existe pas.
-66. En tant que licencié, je veux que mon nom n'apparaisse pas en accès libre, afin que ma
-    participation ne soit pas publiée sur le web.
+66. En tant que spectateur, je veux voir le score set par set et le nom des joueurs alignés sur un
+    match terminé, afin de suivre la compétition en détail sans avoir de compte.
+    _Renverse une exigence initiale de confidentialité — voir ADR-0004._
 
 ### Classement
 
@@ -336,8 +337,10 @@ Contraintes transversales :
 
 - Convex n'a pas de sécurité par ligne : **chaque fonction revérifie le rôle et le rattachement de
   l'appelant**. L'UI masque ce qui n'est pas permis mais ne fait jamais autorité.
-- Les lectures publiques sont des **queries distinctes** qui ne renvoient jamais de nom de personne
-  physique : calendrier (date, heure, lieu, équipes), résultats set par set, classement.
+- Les lectures publiques sont des **queries distinctes**. Les listes — calendrier, résultats,
+  classement — ne renvoient jamais de nom de personne physique. Une exception délibérée, décidée
+  après coup : la feuille d'un match **terminé** expose le score set par set et le nom des joueurs
+  alignés (voir [ADR-0004](../../docs/adr/0004-feuilles-de-match-publiques.md)).
 - Effectifs, compositions et tableaux de bord exigent un compte. Une query privée appelée sans
   identité échoue au lieu de renvoyer une version amputée.
 

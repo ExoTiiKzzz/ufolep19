@@ -1,6 +1,8 @@
 import { ConvexError, v } from "convex/values";
 
-import { mutation, query } from "./_generated/server";
+import { rejectLogo } from "../lib/rules/logo";
+import type { Id } from "./_generated/dataModel";
+import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { requireAdmin } from "./authz";
 
 const club = v.object({
@@ -8,14 +10,29 @@ const club = v.object({
   _creationTime: v.number(),
   name: v.string(),
   defaultVenue: v.string(),
+  logoUrl: v.union(v.string(), v.null()),
 });
+
+/** URL publique du logo d'un club, ou `null` s'il n'en a pas. */
+async function logoUrl(ctx: QueryCtx, logoId: Id<"_storage"> | undefined) {
+  return logoId === undefined ? null : await ctx.storage.getUrl(logoId);
+}
 
 /** Liste des clubs. Lecture publique : un club est une structure, pas une personne. */
 export const list = query({
   args: {},
   returns: v.array(club),
   handler: async (ctx) => {
-    return await ctx.db.query("clubs").withIndex("by_name").collect();
+    const clubs = await ctx.db.query("clubs").withIndex("by_name").collect();
+    return await Promise.all(
+      clubs.map(async (club) => ({
+        _id: club._id,
+        _creationTime: club._creationTime,
+        name: club.name,
+        defaultVenue: club.defaultVenue,
+        logoUrl: await logoUrl(ctx, club.logoId),
+      })),
+    );
   },
 });
 
@@ -80,6 +97,7 @@ export const get = query({
       _id: v.id("clubs"),
       name: v.string(),
       defaultVenue: v.string(),
+      logoUrl: v.union(v.string(), v.null()),
       teams: v.array(
         v.object({
           _id: v.id("teams"),
@@ -124,6 +142,7 @@ export const get = query({
       _id: club._id,
       name: club.name,
       defaultVenue: club.defaultVenue,
+      logoUrl: await logoUrl(ctx, club.logoId),
       // Saison courante en tête, puis les plus récentes.
       teams: detailed.sort(
         (a, b) =>
@@ -134,3 +153,81 @@ export const get = query({
     };
   },
 });
+
+/**
+ * URL d'envoi d'un logo. L'administrateur y dépose le fichier directement, puis appelle
+ * `setLogo` avec l'identifiant obtenu.
+ */
+export const generateLogoUploadUrl = mutation({
+  args: {},
+  returns: v.string(),
+  handler: async (ctx) => {
+    await requireAdmin(ctx);
+    return await ctx.storage.generateUploadUrl();
+  },
+});
+
+/**
+ * Attache un fichier déjà déposé comme logo du club.
+ *
+ * Rend `null` si le logo est attaché, ou le **motif du refus**. Elle ne lève pas d'erreur
+ * pour un fichier refusé, et c'est volontaire : une mutation Convex qui échoue annule
+ * toutes ses écritures, y compris la suppression du fichier refusé — qui resterait alors
+ * orphelin dans le stockage. En rendant le motif, la mutation aboutit et le ménage est fait.
+ *
+ * Le fichier est vérifié ici, et non côté client : le dépôt se fait par une URL signée que
+ * rien n'empêche d'utiliser avec un autre contenu.
+ */
+export const setLogo = mutation({
+  args: { clubId: v.id("clubs"), storageId: v.id("_storage") },
+  returns: v.union(v.null(), v.string()),
+  handler: async (ctx, { clubId, storageId }) => {
+    await requireAdmin(ctx);
+    const club = await ctx.db.get(clubId);
+    if (club === null) {
+      await ctx.storage.delete(storageId);
+      return "Club inconnu.";
+    }
+
+    const file = await ctx.db.system.get(storageId);
+    if (file === null) {
+      return "Fichier introuvable : l'envoi a échoué.";
+    }
+    const rejection = rejectLogo({ contentType: file.contentType, size: file.size });
+    if (rejection !== null) {
+      await ctx.storage.delete(storageId);
+      return rejection;
+    }
+
+    await replaceLogo(ctx, clubId, club.logoId, storageId);
+    return null;
+  },
+});
+
+/** Retire le logo d'un club et supprime le fichier. */
+export const removeLogo = mutation({
+  args: { clubId: v.id("clubs") },
+  returns: v.null(),
+  handler: async (ctx, { clubId }) => {
+    await requireAdmin(ctx);
+    const club = await ctx.db.get(clubId);
+    if (club === null) {
+      throw new ConvexError("Club inconnu.");
+    }
+    await replaceLogo(ctx, clubId, club.logoId, undefined);
+    return null;
+  },
+});
+
+/** Pose le nouveau logo et supprime l'ancien fichier, qui n'a plus de référence. */
+async function replaceLogo(
+  ctx: MutationCtx,
+  clubId: Id<"clubs">,
+  previous: Id<"_storage"> | undefined,
+  next: Id<"_storage"> | undefined,
+) {
+  await ctx.db.patch(clubId, { logoId: next });
+  if (previous !== undefined && previous !== next) {
+    await ctx.storage.delete(previous);
+  }
+}

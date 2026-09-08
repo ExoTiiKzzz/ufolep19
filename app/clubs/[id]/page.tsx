@@ -4,6 +4,7 @@ import { useQuery } from "convex/react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
+import { ClubLogo } from "@/components/club-logo";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -35,9 +36,14 @@ export default function ClubPage() {
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-10">
-      <p className="text-muted-foreground text-sm">Club</p>
-      <h1 className="text-2xl font-semibold tracking-tight">{club.name}</h1>
-      <p className="text-muted-foreground mt-2 text-sm">
+      <div className="flex items-center gap-4">
+        <ClubLogo name={club.name} logoUrl={club.logoUrl} size={64} />
+        <div>
+          <p className="text-muted-foreground text-sm">Club</p>
+          <h1 className="text-2xl font-semibold tracking-tight">{club.name}</h1>
+        </div>
+      </div>
+      <p className="text-muted-foreground mt-3 text-sm">
         {club.defaultVenue === ""
           ? "Aucune salle par défaut renseignée."
           : `Salle par défaut : ${club.defaultVenue}`}

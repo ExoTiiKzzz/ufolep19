@@ -1,6 +1,7 @@
 import type { FunctionReturnType } from "convex/server";
 import Link from "next/link";
 
+import { ClubLogo } from "@/components/club-logo";
 import { Badge } from "@/components/ui/badge";
 import type { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
@@ -35,9 +36,11 @@ export function MatchRow({
       {showMatchday ? (
         <span className="text-muted-foreground w-10">J{match.matchdayNumber}</span>
       ) : null}
-      <span>
+      <span className="flex items-center gap-2">
+        <ClubLogo name={match.homeClubName} logoUrl={match.homeClubLogoUrl} size={20} />
         <span className={emphasis(match.homeTeamId)}>{match.homeTeamName}</span>
-        <span className="text-muted-foreground"> — </span>
+        <span className="text-muted-foreground">—</span>
+        <ClubLogo name={match.awayClubName} logoUrl={match.awayClubLogoUrl} size={20} />
         <span className={emphasis(match.awayTeamId)}>{match.awayTeamName}</span>
       </span>
       {match.result === undefined ? null : (

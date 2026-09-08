@@ -41,7 +41,7 @@ Saison ──< Championnat ──< Journée ──< Match >── Équipe >─�
 
 - **Saison** — cycle annuel (ex. 2025-2026). Regroupe les championnats.
 - **Club** — structure locale. Rattache des joueurs et une ou plusieurs équipes. **Traverse les
-  saisons.**
+  saisons.** Porte une salle par défaut et, facultativement, un **logo** (voir « Fichiers »).
 - **Joueur** — fiche d'un licencié rattaché à un club. **Traverse les saisons.** Existe sans compte
   utilisateur : c'est une donnée d'effectif, pas un utilisateur.
 - **Équipe** — appartient à un club et à **une seule saison**, engagée dans un championnat. Porte
@@ -237,10 +237,20 @@ fiche Joueur n'a pas besoin de compte — la plupart n'en auront jamais.
 
 ## Périmètre public
 
-- **Lisible sans compte** : calendrier avec date, heure et lieu ; scores par set ; classements.
-- **Réservé aux comptes connectés** : effectifs et compositions de feuille de match.
+- **Lisible sans compte** : calendrier avec date, heure et lieu ; classements ; et, pour un match
+  **terminé**, le score set par set et le nom des joueurs alignés.
+- **Réservé aux comptes connectés** : les effectifs (les licenciés qui n'ont pas joué), les fiches
+  joueur, et tout le déroulé administratif d'un match — propositions, motifs de report, motif de
+  contestation, échéances.
 
-Aucun nom de personne physique n'est accessible en lecture libre.
+Un nom de personne physique n'apparaît donc en accès libre que s'il figure sur une **feuille de
+match validée**. Les listes restent anonymes : ni le calendrier, ni les résultats, ni les
+classements, ni les fiches de club et d'équipe ne renvoient de nom. C'est un renversement assumé de
+la décision initiale, avec ses raisons et son risque :
+[ADR-0004](./docs/adr/0004-feuilles-de-match-publiques.md).
+
+Deux limites tiennent la brèche étroite : seuls les matchs **terminés** sont exposés — un score
+contesté peut encore changer — et la query publique ne renvoie rien du déroulé administratif.
 
 ## Authentification et gestion des comptes
 
@@ -266,6 +276,52 @@ Auth assurée par **Convex Auth** (`@convex-dev/auth`), avec un provider mot de 
 - Toutes ces opérations sont des mutations Convex qui **revérifient le rôle de l'appelant côté
   serveur**. L'UI masque ce qui n'est pas permis, mais ne fait jamais autorité.
 
+## Interface
+
+Palette : **bleu pastel** en couleur principale, **abricot doux** en secondaire, rose doux pour les
+problèmes, gris pour le neutre. La couleur porte un sens et n'est pas décorative :
+
+| Token | Usage |
+| --- | --- |
+| `primary` — bleu pastel | état acquis, action principale, bandeau de navigation, tête de classement |
+| `secondary` — abricot | ce qui attend une action : créneau à valider, feuille en attente, fenêtre de journée qui se ferme |
+| `destructive` — rose | problème : litige, fenêtre de journée dépassée |
+| `muted` — gris | information neutre : rôle d'un compte, saison archivée, match terminé |
+
+Deux contraintes qui viennent de ce choix :
+
+- Le bleu pastel est **clair** : son texte est bleu profond (`primary-foreground`), jamais blanc.
+- Les contrôles posés sur le bandeau principal expriment leurs couleurs **relativement à
+  `primary-foreground`**, et non aux couleurs de page. Sans ça, un bouton `outline` devient
+  illisible en thème sombre — fond de page sombre sur bandeau bleu.
+
+Les deux thèmes sont définis : les tokens clairs sur `:root`, les tokens sombres sous
+`prefers-color-scheme: dark`. Toute nouvelle couleur passe par un token, jamais par une classe
+Tailwind de couleur brute.
+
+**Page d'accueil** : elle montre un championnat par défaut — le premier de la saison courante — avec
+son classement, puis la journée en cours, ou la prochaine si aucune fenêtre n'est ouverte, ou la
+dernière si la saison est finie. Un sélecteur groupé par saison permet de changer de championnat
+sans quitter la page.
+
+## Fichiers
+
+Le logo d'un club est stocké dans le **File Storage de Convex**. Le fichier part du navigateur vers
+une URL signée, puis une mutation l'attache au club après vérification **côté serveur** : rien
+n'empêche d'utiliser l'URL signée avec un autre contenu.
+
+- Formats acceptés : PNG, JPEG, WebP, GIF. **SVG exclu** — un SVG peut embarquer du script, et un
+  fichier déposé par un utilisateur n'a pas à être servi tel quel.
+- 2 Mo au maximum.
+- Les règles vivent dans un module pur (`lib/rules/logo.ts`), utilisé par la mutation et par le
+  formulaire, qui évite ainsi un aller-retour inutile — sans jamais faire autorité.
+- Remplacer ou retirer un logo **supprime l'ancien fichier** : pas d'orphelin dans le stockage.
+
+**Piège Convex à connaître** : une mutation qui lève une erreur annule **toutes** ses écritures, y
+compris un `storage.delete`. « Supprimer le fichier refusé puis lever une erreur » est donc
+impossible — le fichier survivrait. C'est pourquoi `clubs.setLogo` **rend le motif du refus** au lieu
+de le lever : la mutation aboutit, et le ménage est fait.
+
 ## Organisation du code
 
 ```
@@ -289,6 +345,8 @@ Conventions :
   [CONTEXT.md](./CONTEXT.md).
 - Chaque accès à une donnée passe par un index Convex explicite ; pas de `filter` sur table
   complète dans un chemin critique.
+- Une liste de matchs partage un **cache d'équipes par requête** (`newTeamCache`) : sans lui, un
+  calendrier complet relirait les deux clubs et résoudrait deux URL de logo à chaque ligne.
 
 ## Agent skills
 

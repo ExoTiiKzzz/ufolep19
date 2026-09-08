@@ -161,7 +161,7 @@ export default function AdminPage() {
                 </span>
                 <span className="text-muted-foreground">journée {row.match.matchdayNumber}</span>
                 {row.windowClosed ? (
-                  <Badge>Fenêtre dépassée</Badge>
+                  <Badge variant="destructive">Fenêtre dépassée</Badge>
                 ) : (
                   <Badge variant="secondary">Fenêtre bientôt fermée</Badge>
                 )}

@@ -70,7 +70,7 @@ export default function AdminChampionshipPage() {
             ) : (
               (teams ?? []).map((team) => (
                 <Link key={team._id} href={`/equipes/${team._id}`}>
-                  <Badge variant="secondary">
+                  <Badge variant="muted">
                     {team.name} · {team.clubName}
                   </Badge>
                 </Link>

@@ -2,6 +2,7 @@ import { ConvexError, v } from "convex/values";
 
 import { mutation, query } from "./_generated/server";
 import { requireAdmin } from "./authz";
+import { matchSummary, newTeamCache, summarize } from "./matches";
 
 const matchday = v.object({
   _id: v.id("matchdays"),
@@ -79,5 +80,68 @@ export const updateWindow = mutation({
     }
     await ctx.db.patch(matchdayId, { windowStart, windowEnd });
     return null;
+  },
+});
+
+/**
+ * La journée en cours d'un championnat, ou la prochaine si on est entre deux journées,
+ * avec ses matchs.
+ *
+ * Trois cas, distingués par `status` pour que l'interface sache quoi annoncer :
+ * `current` (aujourd'hui tombe dans la fenêtre), `upcoming` (aucune fenêtre ouverte, mais
+ * une journée est à venir), `past` (la saison est finie : on montre la dernière journée
+ * plutôt qu'un écran vide).
+ *
+ * Lecture publique.
+ */
+export const currentOrNext = query({
+  args: { championshipId: v.id("championships") },
+  returns: v.union(
+    v.object({
+      _id: v.id("matchdays"),
+      number: v.number(),
+      windowStart: v.number(),
+      windowEnd: v.number(),
+      status: v.union(v.literal("current"), v.literal("upcoming"), v.literal("past")),
+      matches: v.array(matchSummary),
+    }),
+    v.null(),
+  ),
+  handler: async (ctx, { championshipId }) => {
+    const days = (
+      await ctx.db
+        .query("matchdays")
+        .withIndex("by_championship", (q) => q.eq("championshipId", championshipId))
+        .collect()
+    ).sort((a, b) => a.number - b.number);
+    if (days.length === 0) {
+      return null;
+    }
+
+    const now = Date.now();
+    const open = days.find((day) => day.windowStart <= now && now <= day.windowEnd);
+    const upcoming = days
+      .filter((day) => day.windowStart > now)
+      .sort((a, b) => a.windowStart - b.windowStart)[0];
+    const chosen = open ?? upcoming ?? days[days.length - 1];
+    const status = open !== undefined ? "current" : upcoming !== undefined ? "upcoming" : "past";
+
+    const matches = await ctx.db
+      .query("matches")
+      .withIndex("by_matchday", (q) => q.eq("matchdayId", chosen._id))
+      .collect();
+    const cache = newTeamCache();
+    const summaries = await Promise.all(
+      matches.map((match) => summarize(ctx, match, cache)),
+    );
+
+    return {
+      _id: chosen._id,
+      number: chosen.number,
+      windowStart: chosen.windowStart,
+      windowEnd: chosen.windowEnd,
+      status: status as "current" | "upcoming" | "past",
+      matches: summaries.sort((a, b) => (a.slot?.at ?? 0) - (b.slot?.at ?? 0)),
+    };
   },
 });

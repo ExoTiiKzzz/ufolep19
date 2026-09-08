@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "convex/react";
 import Link from "next/link";
 import { useState } from "react";
 
+import { ClubLogoForm } from "@/components/club-logo-form";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -92,6 +93,8 @@ export default function ClubsPage() {
               <CardDescription>{club.defaultVenue || "Aucune salle renseignée"}</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
+              <ClubLogoForm clubId={club._id} name={club.name} logoUrl={club.logoUrl} />
+
               <form
                 className="flex flex-wrap items-end gap-3"
                 onSubmit={async (event) => {

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 
+import { ClubLogo } from "@/components/club-logo";
 import { MatchRow } from "@/components/match-row";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -76,20 +77,29 @@ export default function TeamPage() {
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-10">
-      <p className="text-muted-foreground text-sm">
-        <Link href={`/clubs/${team.clubId}`} className="hover:underline">
-          {team.clubName}
-        </Link>
-        {" · "}
-        <Link href={`/championnats/${team.championshipId}`} className="hover:underline">
-          {team.championshipName}
-        </Link>
-        {" · saison "}
-        {team.seasonLabel}
-      </p>
-      <h1 className="text-2xl font-semibold tracking-tight">{team.name}</h1>
+      <div className="flex items-center gap-4">
+        <ClubLogo name={team.clubName} logoUrl={team.clubLogoUrl} size={56} />
+        <div>
+          <p className="text-muted-foreground text-sm">
+            <Link href={`/clubs/${team.clubId}`} className="hover:underline">
+              {team.clubName}
+            </Link>
+            {" · "}
+            <Link href={`/championnats/${team.championshipId}`} className="hover:underline">
+              {team.championshipName}
+            </Link>
+            {" · saison "}
+            {team.seasonLabel}
+          </p>
+          <h1 className="text-2xl font-semibold tracking-tight">{team.name}</h1>
+        </div>
+      </div>
       <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
-        {team.isCurrentSeason ? <Badge>Saison en cours</Badge> : <Badge variant="secondary">Saison archivée</Badge>}
+        {team.isCurrentSeason ? (
+          <Badge>Saison en cours</Badge>
+        ) : (
+          <Badge variant="muted">Saison archivée</Badge>
+        )}
         {rank === undefined ? null : (
           <span className="text-muted-foreground">
             {rank.rank}
@@ -192,7 +202,7 @@ export default function TeamPage() {
                 <p className="text-muted-foreground">Aucun responsable rattaché.</p>
               ) : (
                 (managers ?? []).map((manager) => (
-                  <Badge key={manager._id} variant="secondary">
+                  <Badge key={manager._id} variant="muted">
                     {manager.name ?? manager.email}
                   </Badge>
                 ))

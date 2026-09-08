@@ -7,6 +7,7 @@ effectifs, organisation concertée des matchs, feuilles de match et classements.
 - **Glossaire du domaine** : [CONTEXT.md](./CONTEXT.md) — le vocabulaire qui y est fixé fait autorité
 - **Décisions d'architecture** : [docs/adr/](./docs/adr/)
 - **Spec et tickets** : [.scratch/saison-volley/](./.scratch/saison-volley/)
+- **Déploiement en production** : [docs/deploiement.md](./docs/deploiement.md)
 
 ## Stack
 
