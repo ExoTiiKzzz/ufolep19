@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "strict": true,
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "module": "ESNext",
+    "target": "ESNext",
+    "lib": ["ES2021", "dom"],
+    "forceConsistentCasingInFileNames": true,
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "noEmit": true
+  },
+  "include": ["./**/*"],
+  "//": "Exclus : le code généré, et les fichiers qui ne sont pas des modules Convex (tests et helper de test, qui utilisent des API Vite absentes du runtime Convex).",
+  "exclude": ["./_generated", "./**/*.test.ts", "./test.setup.ts"]
+}
