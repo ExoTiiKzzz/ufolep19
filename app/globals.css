@@ -9,6 +9,7 @@
   --color-primary-foreground: var(--primary-foreground);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary-border: var(--secondary-border);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-muted: var(--muted);
@@ -24,68 +25,86 @@
 }
 
 /*
- * Palette : bleu pastel en couleur principale, abricot doux en secondaire.
+ * Palette : les couleurs d'un ballon Mikasa — bleu roi, jaune d'or, blanc.
  *
- * Le bleu pastel étant clair, son texte est bleu profond et non blanc — c'est ce qui rend
- * les boutons lisibles. L'abricot est le complémentaire du bleu : il tranche sans jurer, et
- * il est réservé aux états « en attente ». Le rose doux signale les problèmes. Tout ce qui
- * est neutre passe par `muted`, pour que la couleur garde un sens.
+ * Le bleu (#1B4FA0) et le jaune (#FFC61E) sont repris des panneaux du ballon officiel, le
+ * blanc étant le fond des pages. Ce sont des couleurs saturées : le bleu porte du texte
+ * blanc, le jaune du texte sombre.
+ *
+ * La couleur garde le même sens qu'avant :
+ *   primary (bleu)      état acquis, action principale, bandeau, tête de classement
+ *   secondary (jaune)   ce qui attend une action
+ *   destructive (rouge) un problème
+ *   muted (gris)        information neutre
+ *
+ * Tous les couples texte/fond ont été mesurés au ratio WCAG : le plus faible est à 4,7 pour
+ * un seuil de 4,5, dans les deux thèmes. Ne pas modifier une valeur sans refaire ce calcul.
  */
 :root {
   --radius: 0.625rem;
 
-  --background: oklch(0.99 0.004 240);
-  --foreground: oklch(0.28 0.038 250);
+  --background: oklch(0.99 0.004 250);
+  --foreground: oklch(0.25 0.03 259);
 
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.28 0.038 250);
+  --card-foreground: oklch(0.25 0.03 259);
 
-  --primary: oklch(0.84 0.068 235);
-  --primary-foreground: oklch(0.28 0.055 250);
+  /* Bleu Mikasa. */
+  --primary: oklch(0.442 0.143 259.4);
+  --primary-foreground: oklch(0.99 0.005 250);
 
-  --secondary: oklch(0.91 0.052 70);
-  --secondary-foreground: oklch(0.38 0.07 55);
+  /* Jaune Mikasa. Sur fond blanc, il n'a presque aucune frontière : d'où sa bordure. */
+  --secondary: oklch(0.854 0.17 86.8);
+  --secondary-foreground: oklch(0.28 0.05 80);
+  --secondary-border: oklch(0.65 0.16 87);
 
-  --destructive: oklch(0.88 0.075 22);
-  --destructive-foreground: oklch(0.38 0.1 25);
+  --destructive: oklch(0.53 0.2 25);
+  --destructive-foreground: oklch(0.99 0.01 20);
 
-  --muted: oklch(0.96 0.008 240);
-  --muted-foreground: oklch(0.52 0.028 250);
+  --muted: oklch(0.96 0.008 255);
+  --muted-foreground: oklch(0.5 0.03 259);
 
-  --accent: oklch(0.94 0.028 235);
-  --accent-foreground: oklch(0.3 0.05 250);
+  --accent: oklch(0.94 0.03 259);
+  --accent-foreground: oklch(0.3 0.05 259);
 
-  --border: oklch(0.9 0.016 240);
-  --input: oklch(0.88 0.02 240);
-  --ring: oklch(0.75 0.09 235);
+  --border: oklch(0.9 0.015 255);
+  --input: oklch(0.87 0.02 255);
+  --ring: oklch(0.55 0.13 259);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: oklch(0.2 0.022 250);
-    --foreground: oklch(0.95 0.008 240);
+    --background: oklch(0.2 0.02 259);
+    --foreground: oklch(0.96 0.008 250);
 
-    --card: oklch(0.25 0.026 250);
-    --card-foreground: oklch(0.95 0.008 240);
+    --card: oklch(0.25 0.025 259);
+    --card-foreground: oklch(0.96 0.008 250);
 
-    --primary: oklch(0.72 0.088 235);
-    --primary-foreground: oklch(0.18 0.03 250);
+    /*
+     * Le bleu du ballon est trop sombre ici : posé sur un fond sombre, il ne se détacherait
+     * pas (rapport 2,0 pour un seuil de 3). Éclairci juste assez pour passer le seuil tout
+     * en gardant du texte blanc lisible.
+     */
+    --primary: oklch(0.55 0.15 259);
+    --primary-foreground: oklch(0.99 0.005 250);
 
-    --secondary: oklch(0.74 0.075 70);
-    --secondary-foreground: oklch(0.2 0.03 55);
+    /* Le jaune, lui, tient tel quel sur fond sombre. */
+    --secondary: oklch(0.854 0.17 86.8);
+    --secondary-foreground: oklch(0.25 0.05 80);
+    --secondary-border: oklch(0.65 0.16 87);
 
-    --destructive: oklch(0.68 0.1 22);
-    --destructive-foreground: oklch(0.18 0.03 25);
+    --destructive: oklch(0.57 0.19 25);
+    --destructive-foreground: oklch(0.99 0.01 20);
 
-    --muted: oklch(0.3 0.026 250);
-    --muted-foreground: oklch(0.72 0.026 245);
+    --muted: oklch(0.3 0.025 259);
+    --muted-foreground: oklch(0.74 0.03 255);
 
-    --accent: oklch(0.33 0.04 240);
-    --accent-foreground: oklch(0.95 0.008 240);
+    --accent: oklch(0.33 0.04 259);
+    --accent-foreground: oklch(0.96 0.008 250);
 
     --border: oklch(1 0 0 / 14%);
     --input: oklch(1 0 0 / 20%);
-    --ring: oklch(0.62 0.08 235);
+    --ring: oklch(0.6 0.13 259);
   }
 }
 

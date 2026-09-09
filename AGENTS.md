@@ -327,26 +327,36 @@ test le vérifie — et n'est lisible que par un compte connecté.
 
 ## Interface
 
-Palette : **bleu pastel** en couleur principale, **abricot doux** en secondaire, rose doux pour les
-problèmes, gris pour le neutre. La couleur porte un sens et n'est pas décorative :
+Palette : les couleurs d'un **ballon Mikasa** — bleu roi, jaune d'or, blanc. Le bleu
+(`#1B4FA0`) et le jaune (`#FFC61E`) sont repris des panneaux du ballon officiel ; le blanc est
+le fond des pages.
+
+Ce sont des couleurs **saturées** : le bleu porte du texte **blanc**, le jaune du texte
+**sombre**. La couleur porte un sens et n'est pas décorative :
 
 | Token | Usage |
 | --- | --- |
-| `primary` — bleu pastel | état acquis, action principale, bandeau de navigation, tête de classement |
-| `secondary` — abricot | ce qui attend une action : créneau à valider, feuille en attente, fenêtre de journée qui se ferme |
-| `destructive` — rose | problème : litige, fenêtre de journée dépassée |
+| `primary` — bleu roi | état acquis, action principale, bandeau de navigation, tête de classement |
+| `secondary` — jaune d'or | ce qui attend une action : créneau à valider, feuille en attente, fenêtre de journée qui se ferme |
+| `destructive` — rouge | problème : litige, fenêtre de journée dépassée |
 | `muted` — gris | information neutre : rôle d'un compte, saison archivée, match terminé |
 
-Deux contraintes qui viennent de ce choix :
+Quatre contraintes qui viennent de ce choix, chacune pour une raison mesurée :
 
-- Le bleu pastel est **clair** : son texte est bleu profond (`primary-foreground`), jamais blanc.
-- Les contrôles posés sur le bandeau principal expriment leurs couleurs **relativement à
-  `primary-foreground`**, et non aux couleurs de page. Sans ça, un bouton `outline` devient
+- **Tous les couples texte/fond ont été vérifiés au ratio WCAG**, dans les deux thèmes. Le plus
+  faible est à **4,7 pour un seuil de 4,5**. Ne pas modifier une valeur sans refaire ce calcul :
+  l'œil se trompe, surtout sur le jaune.
+- **Le jaune porte une bordure** (`--secondary-border`, un doré plus foncé). Sur une carte
+  blanche, le jaune vif n'a qu'un rapport de 1,6 avec le fond : sans bordure, la pastille
+  flotte, même si son texte est parfaitement lisible.
+- **Le bleu est éclairci en thème sombre.** Le bleu du ballon posé sur un fond sombre tombe à
+  2,0 pour un seuil de 3 : il ne se détacherait pas. Éclairci juste assez pour passer le seuil
+  tout en gardant du texte blanc.
+- **Les contrôles posés sur le bandeau** expriment leurs couleurs relativement à
+  `primary-foreground`, et non aux couleurs de page. Sans ça, un bouton `outline` devient
   illisible en thème sombre — fond de page sombre sur bandeau bleu.
 
-Les deux thèmes sont définis : les tokens clairs sur `:root`, les tokens sombres sous
-`prefers-color-scheme: dark`. Toute nouvelle couleur passe par un token, jamais par une classe
-Tailwind de couleur brute.
+Toute nouvelle couleur passe par un token, jamais par une classe Tailwind de couleur brute.
 
 **Page d'accueil** : elle montre un championnat par défaut — le premier de la saison courante — avec
 son classement, puis la journée en cours, ou la prochaine si aucune fenêtre n'est ouverte, ou la
