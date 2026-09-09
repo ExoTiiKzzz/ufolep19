@@ -63,7 +63,7 @@ export default function AdminPage() {
         <CardHeader>
           <CardTitle className="text-base">Championnats de la saison</CardTitle>
           <CardDescription>
-            Le calendrier est saisi à la main : aucune génération automatique (ADR-0001).
+            Le calendrier est saisi à la main : il n&apos;y a pas de génération automatique.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
@@ -142,8 +142,8 @@ export default function AdminPage() {
         <CardHeader>
           <CardTitle className="text-base">Matchs sans créneau à relancer</CardTitle>
           <CardDescription>
-            Aucune notification n&apos;est envoyée (ADR-0002) : cette vue est le filet de sécurité
-            du comité.
+            Aucune notification n&apos;est envoyée : cette vue est le filet de sécurité du
+            comité.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-2 text-sm">
