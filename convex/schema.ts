@@ -82,9 +82,13 @@ export default defineSchema({
     firstName: v.string(),
     lastName: v.string(),
     licenseNumber: v.string(),
+    // Facultatif. Renseigné, il permet de créer un compte de consultation rattaché à la
+    // fiche. Donnée personnelle : jamais renvoyée par une query publique.
+    email: v.optional(v.string()),
   })
     .index("by_club", ["clubId"])
-    .index("by_license", ["licenseNumber"]),
+    .index("by_license", ["licenseNumber"])
+    .index("by_email", ["email"]),
 
   // Championnat : compétition d'une saison, regroupant N équipes engagées.
   championships: defineTable({

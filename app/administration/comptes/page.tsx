@@ -75,14 +75,20 @@ export default function AccountsPage() {
               const form = new FormData(event.currentTarget);
               const element = event.currentTarget;
               await guard(async () => {
-                await createAccount({
+                const { mail } = await createAccount({
                   email: String(form.get("email")),
                   password: String(form.get("password")),
                   name: String(form.get("name")),
                   role: String(form.get("role")) as Role,
                 });
                 element.reset();
-              }, "Compte créé.");
+                setNotice(
+                  mail.sent
+                    ? "Compte créé, et ses identifiants lui ont été envoyés par e-mail."
+                    : `Compte créé, mais le message n'est pas parti (${mail.error}) : ` +
+                      "transmettez-lui son mot de passe vous-même.",
+                );
+              });
             }}
           >
             <div className="min-w-40 flex-1">

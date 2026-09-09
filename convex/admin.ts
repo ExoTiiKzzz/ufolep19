@@ -2,8 +2,9 @@ import { createAccount, getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 
 import { internal } from "./_generated/api";
-import type { DataModel } from "./_generated/dataModel";
+import type { DataModel, Id } from "./_generated/dataModel";
 import { action, internalAction } from "./_generated/server";
+import { sendAccountCreated } from "./mail";
 import { role } from "./schema";
 
 /**
@@ -58,8 +59,17 @@ export const createAdmin = internalAction({
  */
 export const createUserAccount = action({
   args: { email: v.string(), password: v.string(), name: v.string(), role },
-  returns: v.id("users"),
-  handler: async (ctx, args) => {
+  returns: v.object({
+    userId: v.id("users"),
+    mail: v.object({ sent: v.boolean(), error: v.union(v.string(), v.null()) }),
+  }),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    userId: Id<"users">;
+    mail: { sent: boolean; error: string | null };
+  }> => {
     await ctx.runQuery(internal.users.assertAdmin, { userId: await getAuthUserId(ctx) });
 
     const email = args.email.trim().toLowerCase();
@@ -79,6 +89,13 @@ export const createUserAccount = action({
       account: { id: email, secret: args.password },
       profile: { email, name: args.name.trim(), role: args.role },
     });
-    return user._id;
+
+    // L'envoi ne conditionne pas la création du compte.
+    const mail = await sendAccountCreated({
+      to: email,
+      name: args.name.trim(),
+      password: args.password,
+    });
+    return { userId: user._id, mail };
   },
 });

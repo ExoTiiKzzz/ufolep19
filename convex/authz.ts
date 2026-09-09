@@ -69,20 +69,52 @@ export async function requireManagerOfTeam(
   return user;
 }
 
+/** Vrai si ce compte administre, ou gère au moins une équipe de ce club. */
+async function managesClub(ctx: Ctx, user: Doc<"users">, clubId: Id<"clubs">) {
+  if (user.role === "admin") {
+    return true;
+  }
+  for (const teamId of await managedTeamIds(ctx, user._id)) {
+    const team = await ctx.db.get(teamId);
+    if (team !== null && team.clubId === clubId) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** Le compte appelant s'il gère au moins une équipe de ce club, ou s'il est administrateur. */
 export async function requireManagerOfClub(
   ctx: Ctx,
   clubId: Id<"clubs">,
 ): Promise<Doc<"users">> {
   const user = await requireUser(ctx);
-  if (user.role === "admin") {
+  if (await managesClub(ctx, user, clubId)) {
     return user;
   }
-  for (const teamId of await managedTeamIds(ctx, user._id)) {
-    const team = await ctx.db.get(teamId);
-    if (team !== null && team.clubId === clubId) {
-      return user;
-    }
+  throw new ConvexError("Vous ne gérez aucune équipe de ce club.");
+}
+
+/**
+ * Même contrôle, mais sur un compte désigné explicitement.
+ *
+ * Utilisé depuis les actions : elles n'ont pas accès à la base, et on préfère leur faire
+ * résoudre l'identité elles-mêmes plutôt que de compter sur sa propagation.
+ */
+export async function requireManagerOfClubById(
+  ctx: Ctx,
+  userId: Id<"users"> | null,
+  clubId: Id<"clubs">,
+): Promise<Doc<"users">> {
+  if (userId === null) {
+    throw new ConvexError("Authentification requise.");
+  }
+  const user = await ctx.db.get(userId);
+  if (user === null) {
+    throw new ConvexError("Authentification requise.");
+  }
+  if (await managesClub(ctx, user, clubId)) {
+    return user;
   }
   throw new ConvexError("Vous ne gérez aucune équipe de ce club.");
 }

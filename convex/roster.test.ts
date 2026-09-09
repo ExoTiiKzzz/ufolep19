@@ -10,12 +10,12 @@ test("un responsable constitue l'effectif de son équipe", async () => {
   const s = await setupChampionship(t);
   const asHome = t.withIdentity({ subject: s.homeManager });
 
-  const playerId = await asHome.mutation(api.players.create, {
+  const playerId = await asHome.action(api.players.create, {
     clubId: s.homeClubId,
     firstName: "Camille",
     lastName: "Durand",
     licenseNumber: "L0001",
-  });
+  }).then((result) => result.playerId);
   await asHome.mutation(api.roster.add, { teamId: s.homeTeamId, playerId });
 
   const roster = await asHome.query(api.roster.listByTeam, { teamId: s.homeTeamId });
@@ -28,12 +28,12 @@ test("une fiche joueur existe sans compte utilisateur", async () => {
 
   const playerId = await t
     .withIdentity({ subject: s.homeManager })
-    .mutation(api.players.create, {
+    .action(api.players.create, {
       clubId: s.homeClubId,
       firstName: "Camille",
       lastName: "Durand",
       licenseNumber: "L0001",
-    });
+    }).then((result) => result.playerId);
 
   const player = await t.run(async (ctx) => ctx.db.get(playerId));
   expect(player).not.toBeNull();
@@ -47,12 +47,12 @@ test("ajouter deux fois le même joueur ne crée pas de doublon", async () => {
   const t = convexTest(schema, modules);
   const s = await setupChampionship(t);
   const asHome = t.withIdentity({ subject: s.homeManager });
-  const playerId = await asHome.mutation(api.players.create, {
+  const playerId = await asHome.action(api.players.create, {
     clubId: s.homeClubId,
     firstName: "Camille",
     lastName: "Durand",
     licenseNumber: "L0001",
-  });
+  }).then((result) => result.playerId);
 
   await asHome.mutation(api.roster.add, { teamId: s.homeTeamId, playerId });
   await asHome.mutation(api.roster.add, { teamId: s.homeTeamId, playerId });
@@ -146,7 +146,7 @@ test("un numéro de licence déjà enregistré est refusé", async () => {
   const t = convexTest(schema, modules);
   const s = await setupChampionship(t);
   const asHome = t.withIdentity({ subject: s.homeManager });
-  await asHome.mutation(api.players.create, {
+  await asHome.action(api.players.create, {
     clubId: s.homeClubId,
     firstName: "Camille",
     lastName: "Durand",
@@ -154,7 +154,7 @@ test("un numéro de licence déjà enregistré est refusé", async () => {
   });
 
   await expect(
-    asHome.mutation(api.players.create, {
+    asHome.action(api.players.create, {
       clubId: s.homeClubId,
       firstName: "Autre",
       lastName: "Personne",
@@ -178,12 +178,12 @@ test("un joueur peut appartenir à deux équipes de son club", async () => {
     ctx.db.insert("teamManagers", { teamId: secondTeam, userId: s.homeManager }),
   );
   const asHome = t.withIdentity({ subject: s.homeManager });
-  const playerId = await asHome.mutation(api.players.create, {
+  const playerId = await asHome.action(api.players.create, {
     clubId: s.homeClubId,
     firstName: "Camille",
     lastName: "Durand",
     licenseNumber: "L0001",
-  });
+  }).then((result) => result.playerId);
 
   await asHome.mutation(api.roster.add, { teamId: s.homeTeamId, playerId });
   await asHome.mutation(api.roster.add, { teamId: secondTeam, playerId });

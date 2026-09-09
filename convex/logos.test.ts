@@ -197,3 +197,44 @@ test("les logos d'un calendrier ne sont résolus qu'une fois par équipe", async
   expect(urls.size).toBe(2);
   expect([...urls]).toContain(null);
 });
+
+test("un club peut être créé avec son logo d'un seul geste", async () => {
+  const t = convexTest(schema, modules);
+  const admin = await seedAccount(t, {
+    email: "comite@ufolep19.fr",
+    name: "Comité",
+    role: "admin",
+  });
+  // Fichier sans type déclaré : le harnais n'en pose pas, donc il sera refusé — ce qui
+  // vérifie surtout que le club est créé quand même et que le fichier est nettoyé.
+  const storageId = await storeFile(t);
+
+  const { clubId, logoRejection } = await t
+    .withIdentity({ subject: admin })
+    .mutation(api.clubs.create, {
+      name: "VB Coiroux",
+      defaultVenue: "Gymnase du Coiroux",
+      logoStorageId: storageId,
+    });
+
+  expect(logoRejection).toMatch(/Format non accepté/i);
+  const club = await t.query(api.clubs.get, { clubId });
+  expect(club).toMatchObject({ name: "VB Coiroux", logoUrl: null });
+  expect(await t.run(async (ctx) => ctx.db.system.get(storageId))).toBeNull();
+});
+
+test("un club créé sans logo n'en a pas, et rien n'est refusé", async () => {
+  const t = convexTest(schema, modules);
+  const admin = await seedAccount(t, {
+    email: "comite@ufolep19.fr",
+    name: "Comité",
+    role: "admin",
+  });
+
+  const { clubId, logoRejection } = await t
+    .withIdentity({ subject: admin })
+    .mutation(api.clubs.create, { name: "Malemort VB", defaultVenue: "Gymnase" });
+
+  expect(logoRejection).toBeNull();
+  expect((await t.query(api.clubs.get, { clubId }))?.logoUrl).toBeNull();
+});

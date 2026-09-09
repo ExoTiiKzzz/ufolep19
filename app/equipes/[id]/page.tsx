@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
@@ -44,12 +44,13 @@ export default function TeamPage() {
   );
   const previous = useQuery(api.roster.previousSeasonTeam, account ? { teamId } : "skip");
 
-  const createPlayer = useMutation(api.players.create);
+  const createPlayer = useAction(api.players.create);
   const addToRoster = useMutation(api.roster.add);
   const removeFromRoster = useMutation(api.roster.remove);
   const copyRoster = useMutation(api.roster.copyFrom);
 
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [selected, setSelected] = useState("");
 
   const canManage =
@@ -61,6 +62,7 @@ export default function TeamPage() {
 
   async function guard(action: () => Promise<unknown>) {
     setError(null);
+    setNotice(null);
     try {
       await action();
     } catch (caught) {
@@ -113,6 +115,11 @@ export default function TeamPage() {
       </div>
 
       {error === null ? null : <p className="mt-4 text-sm text-red-600">{error}</p>}
+      {notice === null ? null : (
+        <p className="mt-4 text-sm text-green-700" role="status">
+          {notice}
+        </p>
+      )}
 
       <Card className="mt-8">
         <CardHeader>
@@ -286,14 +293,27 @@ export default function TeamPage() {
                   const form = new FormData(event.currentTarget);
                   const element = event.currentTarget;
                   await guard(async () => {
-                    const playerId = await createPlayer({
+                    const { playerId, account } = await createPlayer({
                       clubId: team.clubId,
                       firstName: String(form.get("firstName")),
                       lastName: String(form.get("lastName")),
                       licenseNumber: String(form.get("licenseNumber")),
+                      email: String(form.get("email")),
                     });
                     await addToRoster({ teamId, playerId });
                     element.reset();
+                    setNotice(
+                      account === null
+                        ? "Joueur créé et ajouté à l'effectif."
+                        : account.linkedExisting
+                          ? `Joueur ajouté, et rattaché au compte existant ${account.email}.`
+                          : account.mail?.sent === true
+                            ? `Joueur ajouté. Ses identifiants viennent de lui être envoyés à ${account.email}.`
+                            : `Joueur ajouté, avec un compte pour ${account.email}. ` +
+                              `Le message n'est pas parti (${account.mail?.error ?? "raison inconnue"}) : ` +
+                              `transmettez-lui son mot de passe provisoire ${account.temporaryPassword}, ` +
+                              "il ne sera plus affiché.",
+                    );
                   });
                 }}
               >
@@ -308,6 +328,16 @@ export default function TeamPage() {
                 <div>
                   <Label htmlFor="licenseNumber">Licence</Label>
                   <Input id="licenseNumber" name="licenseNumber" className="mt-2" />
+                </div>
+                <div className="min-w-56 flex-1">
+                  <Label htmlFor="email">E-mail (facultatif)</Label>
+                  <Input
+                    id="email"
+                    name="email"
+                    type="email"
+                    className="mt-2"
+                    placeholder="crée un compte de consultation"
+                  />
                 </div>
                 <Button type="submit">Créer et ajouter</Button>
               </form>

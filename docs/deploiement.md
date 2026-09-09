@@ -119,6 +119,30 @@ build** : l'application se déploie normalement. Plutôt que de rendre une page 
 alors un écran « Backend non configuré » qui rappelle les deux options ci-dessus. Une variable
 présente mais vide compte comme absente.
 
+## 4 bis. Configurer l'envoi d'e-mails (Brevo)
+
+Nécessaire pour que les identifiants d'un nouveau compte partent tout seuls. Sans ça, tout
+fonctionne, mais chaque mot de passe doit être transmis à la main.
+
+1. Créer un compte sur Brevo et **vérifier un domaine expéditeur** (ou au minimum une adresse) —
+   sans quoi Brevo refuse les envois.
+2. Générer une clé d'API transactionnelle.
+3. Poser les variables sur le déploiement de production :
+
+```bash
+npx convex env set BREVO_API_KEY "xkeysib-..." --prod
+npx convex env set MAIL_SENDER_EMAIL "volley@votre-domaine.fr" --prod
+npx convex env set MAIL_SENDER_NAME "UFOLEP 19 — Volley" --prod
+```
+
+`SITE_URL` est déjà posée par l'étape 3. Si l'une des trois variables manque, l'application le dit
+précisément à l'écran au moment de la création d'un compte, et donne le mot de passe à transmettre
+autrement.
+
+Pour vérifier : créez un compte de test depuis `/administration/comptes` avec une adresse à vous.
+L'écran annonce soit l'envoi, soit le motif de refus de Brevo (expéditeur non vérifié, clé
+invalide, quota).
+
 ## 5. Amorcer le premier administrateur
 
 La production n'a aucun compte, et il n'y a pas d'inscription publique. Le premier administrateur se

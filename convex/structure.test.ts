@@ -104,7 +104,7 @@ test("la saison d'une équipe est dérivée de son championnat", async () => {
   const clubId = await admin.mutation(api.clubs.create, {
     name: "Club A",
     defaultVenue: "Gymnase A",
-  });
+  }).then((result) => result.clubId);
 
   const teamId = await admin.mutation(api.teams.create, {
     clubId,
@@ -127,7 +127,7 @@ test("les équipes engagées sont listées avec leur club, sans compte", async (
   const clubId = await admin.mutation(api.clubs.create, {
     name: "Club A",
     defaultVenue: "Gymnase A",
-  });
+  }).then((result) => result.clubId);
   await admin.mutation(api.teams.create, { clubId, championshipId, name: "Club A 1" });
   await admin.mutation(api.teams.create, { clubId, championshipId, name: "Club A 2" });
 
@@ -149,7 +149,7 @@ test("une équipe engagée dans un championnat inconnu est refusée", async () =
   const clubId = await admin.mutation(api.clubs.create, {
     name: "Club A",
     defaultVenue: "Gymnase A",
-  });
+  }).then((result) => result.clubId);
   await t.run(async (ctx) => ctx.db.delete(championshipId));
 
   await expect(

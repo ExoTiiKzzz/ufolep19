@@ -36,9 +36,23 @@ export const list = query({
   },
 });
 
+/**
+ * Crée un club, avec son logo si un fichier a déjà été déposé.
+ *
+ * Rend l'identifiant du club et, le cas échéant, le **motif de refus du logo** : le club est
+ * créé dans tous les cas, et un fichier refusé est supprimé. Lever une erreur aurait annulé
+ * cette suppression avec le reste de la mutation (voir `setLogo`).
+ */
 export const create = mutation({
-  args: { name: v.string(), defaultVenue: v.string() },
-  returns: v.id("clubs"),
+  args: {
+    name: v.string(),
+    defaultVenue: v.string(),
+    logoStorageId: v.optional(v.id("_storage")),
+  },
+  returns: v.object({
+    clubId: v.id("clubs"),
+    logoRejection: v.union(v.string(), v.null()),
+  }),
   handler: async (ctx, args) => {
     await requireAdmin(ctx);
     const name = args.name.trim();
@@ -52,7 +66,31 @@ export const create = mutation({
     if (existing !== null) {
       throw new ConvexError(`Le club ${name} existe déjà.`);
     }
-    return await ctx.db.insert("clubs", { name, defaultVenue: args.defaultVenue.trim() });
+
+    let logoId: Id<"_storage"> | undefined;
+    let logoRejection: string | null = null;
+    if (args.logoStorageId !== undefined) {
+      const file = await ctx.db.system.get(args.logoStorageId);
+      const rejection =
+        file === null
+          ? "Fichier introuvable : l'envoi a échoué."
+          : rejectLogo({ contentType: file.contentType, size: file.size });
+      if (rejection === null) {
+        logoId = args.logoStorageId;
+      } else {
+        logoRejection = rejection;
+        if (file !== null) {
+          await ctx.storage.delete(args.logoStorageId);
+        }
+      }
+    }
+
+    const clubId = await ctx.db.insert("clubs", {
+      name,
+      defaultVenue: args.defaultVenue.trim(),
+      logoId,
+    });
+    return { clubId, logoRejection };
   },
 });
 

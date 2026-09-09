@@ -43,7 +43,8 @@ Saison ──< Championnat ──< Journée ──< Match >── Équipe >─�
 - **Club** — structure locale. Rattache des joueurs et une ou plusieurs équipes. **Traverse les
   saisons.** Porte une salle par défaut et, facultativement, un **logo** (voir « Fichiers »).
 - **Joueur** — fiche d'un licencié rattaché à un club. **Traverse les saisons.** Existe sans compte
-  utilisateur : c'est une donnée d'effectif, pas un utilisateur.
+  utilisateur : c'est une donnée d'effectif, pas un utilisateur. Peut porter une **adresse e-mail**,
+  qui déclenche la création d'un compte de consultation (voir « Comptes de licenciés »).
 - **Équipe** — appartient à un club et à **une seule saison**, engagée dans un championnat. Porte
   un effectif et un ou plusieurs **responsables**. Une nouvelle saison = de nouvelles équipes, avec
   reprise possible de l'effectif précédent.
@@ -273,6 +274,54 @@ Auth assurée par **Convex Auth** (`@convex-dev/auth`), avec un provider mot de 
 - **Modification des rôles** : un administrateur peut faire passer un compte de `player` à
   `manager` ou `admin`, et inversement. Garde-fou : la mutation refuse de supprimer le dernier
   compte `admin` (protection contre le verrouillage total).
+
+### Comptes de licenciés
+
+Créer un licencié **avec une adresse e-mail** crée en même temps son **compte de consultation**
+(rôle `player`, aucun droit d'écriture), rattaché à sa fiche. Une adresse déjà titulaire d'un compte
+est **rattachée** à la fiche plutôt que dupliquée ; une adresse déjà utilisée par un autre licencié
+est refusée.
+
+Un responsable d'équipe peut donc créer un compte, mais **seulement** de rôle `player` et
+**seulement** pour un licencié de son club. Le reste de la gestion des comptes — rôles,
+rattachements d'équipe — demeure réservé à l'administrateur.
+
+Le compte reçoit un **mot de passe provisoire**, envoyé par e-mail à la personne (voir
+« Envoi d'e-mails ») **et** affiché une seule fois à l'écran. Si l'envoi échoue, l'écran le dit et
+donne le mot de passe à transmettre autrement.
+
+Ce mot de passe n'est jamais réaffiché, et il n'existe **aucun parcours de réinitialisation** : un
+compte dont le mot de passe est perdu se règle en recréant le compte. C'est la contrepartie du choix
+d'envoyer le mot de passe plutôt qu'un lien de définition.
+
+## Envoi d'e-mails
+
+Seul cas d'envoi aujourd'hui : les identifiants d'un compte qui vient d'être créé. Il n'y a
+**toujours aucune notification** sur le déroulé des matchs
+([ADR-0002](./docs/adr/0002-validation-tacite-sans-notification.md)).
+
+L'envoi passe par l'**API HTTP de Brevo** (`convex/mail.ts`). Pas de SMTP : les actions Convex
+tournent dans un runtime JavaScript sans accès TCP brut. Trois variables sur le déploiement Convex :
+
+| Variable | Rôle |
+| --- | --- |
+| `BREVO_API_KEY` | clé d'API transactionnelle |
+| `MAIL_SENDER_EMAIL` | expéditeur, sur un domaine **vérifié** chez Brevo |
+| `SITE_URL` | lien de connexion dans le message — déjà posée par l'outil de Convex Auth |
+
+`MAIL_SENDER_NAME` est facultative. Si l'une des trois manque, l'envoi n'est pas tenté et le message
+d'erreur **les nomme toutes**.
+
+Deux règles de conception :
+
+- **Un envoi qui échoue ne fait jamais échouer la création du compte.** `sendMail` ne lève pas : elle
+  rend `{ sent, error }`, que l'appelant remonte à l'écran. Un compte créé sans message envoyé reste
+  utilisable, mot de passe affiché.
+- **Le motif de refus de Brevo est remonté tel quel** (clé invalide, expéditeur non vérifié, quota) :
+  un « échec d'envoi » opaque coûte une demi-heure de diagnostic.
+
+L'adresse d'un licencié est une **donnée personnelle** : elle ne sort d'aucune query publique — un
+test le vérifie — et n'est lisible que par un compte connecté.
 - Toutes ces opérations sont des mutations Convex qui **revérifient le rôle de l'appelant côté
   serveur**. L'UI masque ce qui n'est pas permis, mais ne fait jamais autorité.
 

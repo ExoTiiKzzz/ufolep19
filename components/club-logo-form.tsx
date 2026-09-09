@@ -7,7 +7,8 @@ import { ClubLogo } from "@/components/club-logo";
 import { Button } from "@/components/ui/button";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
-import { ACCEPTED_LOGO_TYPES, rejectLogo } from "@/lib/rules/logo";
+import { ACCEPTED_LOGO_TYPES } from "@/lib/rules/logo";
+import { uploadLogo } from "@/lib/upload-logo";
 
 /**
  * Envoi du logo d'un club, réservé à l'administration.
@@ -34,29 +35,17 @@ export function ClubLogoForm({
 
   async function upload(file: File) {
     setError(null);
-    const clientSide = rejectLogo({ contentType: file.type, size: file.size });
-    if (clientSide !== null) {
-      setError(clientSide);
-      return;
-    }
     setPending(true);
     try {
-      const url = await generateUploadUrl();
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": file.type },
-        body: file,
-      });
-      if (!response.ok) {
-        throw new Error("L'envoi du fichier a échoué.");
+      const upload = await uploadLogo(generateUploadUrl, file);
+      if (upload.error !== null) {
+        setError(upload.error);
+        return;
       }
-      const { storageId } = (await response.json()) as { storageId: Id<"_storage"> };
-      const rejection = await setLogo({ clubId, storageId });
+      const rejection = await setLogo({ clubId, storageId: upload.storageId });
       if (rejection !== null) {
         setError(rejection);
       }
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Envoi impossible.");
     } finally {
       setPending(false);
       if (input.current !== null) {

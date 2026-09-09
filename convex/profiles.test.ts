@@ -155,3 +155,34 @@ test("les nouvelles queries publiques ne renvoient aucun nom de personne", async
   ]);
   expect(payloads).not.toContain(lastName);
 });
+
+test("l'e-mail d'un licencié ne sort jamais par une query publique", async () => {
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+  await t.withIdentity({ subject: s.homeManager }).action(api.players.create, {
+    clubId: s.homeClubId,
+    firstName: "Camille",
+    lastName: "Durand",
+    licenseNumber: "L0001",
+    email: "camille.durand@club-a.fr",
+  });
+
+  const payloads = JSON.stringify([
+    await t.query(api.clubs.get, { clubId: s.homeClubId }),
+    await t.query(api.clubs.list, {}),
+    await t.query(api.teams.get, { teamId: s.homeTeamId }),
+    await t.query(api.teams.matches, { teamId: s.homeTeamId }),
+    await t.query(api.matches.listByChampionship, { championshipId: s.championshipId }),
+    await t.query(api.standings.byChampionship, { championshipId: s.championshipId }),
+  ]);
+
+  expect(payloads).not.toContain("camille.durand@club-a.fr");
+  // La liste des licenciés, elle, l'expose — mais elle exige un compte.
+  await expect(t.query(api.players.listByClub, { clubId: s.homeClubId })).rejects.toThrow(
+    /authentification requise/i,
+  );
+  const list = await t
+    .withIdentity({ subject: s.homeManager })
+    .query(api.players.listByClub, { clubId: s.homeClubId });
+  expect(list[0].email).toBe("camille.durand@club-a.fr");
+});

@@ -15,6 +15,7 @@ import type * as authz from "../authz.js";
 import type * as championships from "../championships.js";
 import type * as clubs from "../clubs.js";
 import type * as http from "../http.js";
+import type * as mail from "../mail.js";
 import type * as matchdays from "../matchdays.js";
 import type * as matches from "../matches.js";
 import type * as negotiation from "../negotiation.js";
@@ -40,6 +41,7 @@ declare const fullApi: ApiFromModules<{
   championships: typeof championships;
   clubs: typeof clubs;
   http: typeof http;
+  mail: typeof mail;
   matchdays: typeof matchdays;
   matches: typeof matches;
   negotiation: typeof negotiation;
