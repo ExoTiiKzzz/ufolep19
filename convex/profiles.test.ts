@@ -7,6 +7,7 @@ import {
   forceConfirmed,
   modules,
   seedBothRosters,
+  seedRoster,
   setupChampionship,
   SLOT_AT,
   VALID_SETS,
@@ -185,4 +186,105 @@ test("l'e-mail d'un licencié ne sort jamais par une query publique", async () =
     .withIdentity({ subject: s.homeManager })
     .query(api.players.listByClub, { clubId: s.homeClubId });
   expect(list[0].email).toBe("camille.durand@club-a.fr");
+});
+
+test("la recherche de licenciés trouve par nom, licence et adresse", async () => {
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+  const asManager = t.withIdentity({ subject: s.homeManager });
+  await asManager.action(api.players.create, {
+    clubId: s.homeClubId,
+    firstName: "Camille",
+    lastName: "Pénicaut",
+    licenseNumber: "L0042",
+    email: "camille.penicaut@club-a.fr",
+  });
+  await asManager.action(api.players.create, {
+    clubId: s.homeClubId,
+    firstName: "Noé",
+    lastName: "Lascaux",
+    licenseNumber: "L0043",
+  });
+  const asAdmin = t.withIdentity({ subject: s.admin });
+
+  // Sans terme, toutes les fiches.
+  expect((await asAdmin.query(api.players.search, { term: "" })).total).toBe(2);
+
+  // Le nom, sans son accent.
+  const byName = await asAdmin.query(api.players.search, { term: "penicaut" });
+  expect(byName.players.map((p) => p.lastName)).toEqual(["Pénicaut"]);
+  expect(byName.players[0]).toMatchObject({
+    clubName: "Club A",
+    licenseNumber: "L0042",
+    hasAccount: true,
+  });
+
+  // Le numéro de licence, et l'adresse.
+  expect((await asAdmin.query(api.players.search, { term: "L0043" })).total).toBe(1);
+  expect((await asAdmin.query(api.players.search, { term: "club-a.fr" })).total).toBe(1);
+
+  // Un licencié sans adresse n'a pas de compte.
+  const withoutEmail = await asAdmin.query(api.players.search, { term: "lascaux" });
+  expect(withoutEmail.players[0]).toMatchObject({ email: null, hasAccount: false });
+});
+
+test("la recherche indique les équipes du licencié", async () => {
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+  await seedRoster(t, { teamId: s.homeTeamId, clubId: s.homeClubId, count: 1 });
+
+  const found = await t.withIdentity({ subject: s.admin }).query(api.players.search, {
+    term: "nom1",
+  });
+  expect(found.players[0]).toMatchObject({ teamNames: ["Club A 1"] });
+});
+
+test("la recherche de licenciés est réservée à l'administrateur", async () => {
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+
+  await expect(t.query(api.players.search, { term: "" })).rejects.toThrow(
+    /authentification requise/i,
+  );
+  await expect(
+    t.withIdentity({ subject: s.homeManager }).query(api.players.search, { term: "" }),
+  ).rejects.toThrow(/réservée aux administrateurs/i);
+});
+
+test("au-delà de la limite, la recherche le signale", async () => {
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+  await t.run(async (ctx) => {
+    for (let i = 0; i < 105; i++) {
+      await ctx.db.insert("players", {
+        clubId: s.homeClubId,
+        firstName: `Prénom${i}`,
+        lastName: `Nom${String(i).padStart(3, "0")}`,
+        licenseNumber: `L${String(i).padStart(4, "0")}`,
+      });
+    }
+  });
+
+  const found = await t
+    .withIdentity({ subject: s.admin })
+    .query(api.players.search, { term: "" });
+  expect(found.total).toBe(105);
+  expect(found.players).toHaveLength(100);
+  expect(found.truncated).toBe(true);
+  // Triées par nom : la première page commence au début de l'alphabet.
+  expect(found.players[0].lastName).toBe("Nom000");
+});
+
+test("la recherche de licenciés filtre aussi par club", async () => {
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+  await seedRoster(t, { teamId: s.homeTeamId, clubId: s.homeClubId, count: 2 });
+  await seedRoster(t, { teamId: s.awayTeamId, clubId: s.awayClubId, count: 3 });
+  const asAdmin = t.withIdentity({ subject: s.admin });
+
+  expect((await asAdmin.query(api.players.search, { term: "" })).total).toBe(5);
+  const clubA = await asAdmin.query(api.players.search, { term: "club a" });
+  expect(clubA.total).toBe(2);
+  expect(clubA.players.every((player) => player.clubName === "Club A")).toBe(true);
+  expect((await asAdmin.query(api.players.search, { term: "club b" })).total).toBe(3);
 });

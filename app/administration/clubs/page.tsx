@@ -2,9 +2,11 @@
 
 import { useAction, useMutation, useQuery } from "convex/react";
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useState } from "react";
 
 import { ClubLogoForm } from "@/components/club-logo-form";
+import { ClubLogo } from "@/components/club-logo";
+import { LogoPicker } from "@/components/logo-picker";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -19,7 +21,6 @@ import {
 } from "@/components/ui/table";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
-import { ACCEPTED_LOGO_TYPES } from "@/lib/rules/logo";
 import { uploadLogo } from "@/lib/upload-logo";
 
 export default function ClubsPage() {
@@ -30,7 +31,8 @@ export default function ClubsPage() {
   const createPlayer = useAction(api.players.create);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const newLogo = useRef<HTMLInputElement>(null);
+  // Le logo du nouveau club attend la soumission : le club n'existe pas encore.
+  const [newLogo, setNewLogo] = useState<File | null>(null);
   const [openClub, setOpenClub] = useState<Id<"clubs"> | null>(null);
   const players = useQuery(api.players.listByClub, openClub ? { clubId: openClub } : "skip");
 
@@ -72,10 +74,11 @@ export default function ClubsPage() {
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-10">
-      <h1 className="text-2xl font-semibold tracking-tight">Clubs et licenciés</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">Clubs</h1>
       <p className="text-muted-foreground mt-2 text-sm">
         La salle par défaut préremplit le lieu des créneaux proposés par les équipes du club
-        lorsqu&apos;elles reçoivent.
+        lorsqu&apos;elles reçoivent. Pour chercher un licencié dans tout le département, voir la
+        page Licenciés.
       </p>
 
       {error === null ? null : <p className="mt-4 text-sm text-red-600">{error}</p>}
@@ -99,10 +102,9 @@ export default function ClubsPage() {
               await guard(async () => {
                 // Le fichier part d'abord vers le stockage : la mutation ne reçoit qu'un
                 // identifiant, et le club se crée même si le logo est refusé.
-                const file = newLogo.current?.files?.[0];
                 let logoStorageId: Id<"_storage"> | undefined;
-                if (file !== undefined) {
-                  const upload = await uploadLogo(generateUploadUrl, file);
+                if (newLogo !== null) {
+                  const upload = await uploadLogo(generateUploadUrl, newLogo);
                   if (upload.error !== null) {
                     setError(upload.error);
                     return;
@@ -115,6 +117,7 @@ export default function ClubsPage() {
                   logoStorageId,
                 });
                 element.reset();
+                setNewLogo(null);
                 setNotice(
                   logoRejection === null
                     ? "Club créé."
@@ -131,16 +134,28 @@ export default function ClubsPage() {
               <Label htmlFor="defaultVenue">Salle par défaut</Label>
               <Input id="defaultVenue" name="defaultVenue" className="mt-2" />
             </div>
-            <div className="min-w-56 flex-1">
-              <Label htmlFor="logo">Logo (facultatif)</Label>
-              <input
-                ref={newLogo}
-                id="logo"
-                name="logo"
-                type="file"
-                accept={ACCEPTED_LOGO_TYPES.join(",")}
-                className="text-muted-foreground mt-2 block text-sm"
-              />
+            <div>
+              <Label htmlFor="new-club-logo">Logo</Label>
+              <div className="mt-2 flex items-center gap-2">
+                {newLogo === null ? (
+                  <LogoPicker
+                    inputId="new-club-logo"
+                    label="Ajouter un logo au nouveau club"
+                    onPick={setNewLogo}
+                  />
+                ) : (
+                  <>
+                    <ClubLogo
+                      name={newLogo.name}
+                      logoUrl={URL.createObjectURL(newLogo)}
+                      size={36}
+                    />
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setNewLogo(null)}>
+                      Retirer
+                    </Button>
+                  </>
+                )}
+              </div>
             </div>
             <Button type="submit">Créer</Button>
           </form>

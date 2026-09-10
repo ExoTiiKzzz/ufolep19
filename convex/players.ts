@@ -2,10 +2,11 @@ import { createAccount, getAuthUserId } from "@convex-dev/auth/server";
 import { ConvexError, v } from "convex/values";
 
 import { isPlausibleEmail, normalizeEmail } from "../lib/rules/email";
+import { matchesPlayer } from "../lib/rules/player-search";
 import { internal } from "./_generated/api";
 import type { DataModel, Id } from "./_generated/dataModel";
 import { action, internalMutation, query } from "./_generated/server";
-import { requireManagerOfClubById, requireUser } from "./authz";
+import { requireAdmin, requireManagerOfClubById, requireUser } from "./authz";
 import { sendAccountCreated } from "./mail";
 import { matchSummary, newTeamCache, summarize } from "./matches";
 
@@ -298,5 +299,97 @@ export const get = query({
         .filter((row): row is NonNullable<typeof row> => row !== null)
         .sort((a, b) => a.match.matchdayNumber - b.match.matchdayNumber),
     };
+  },
+});
+
+/** Nombre de fiches rendues au maximum : au-delà, on affine la recherche. */
+export const SEARCH_LIMIT = 100;
+
+/**
+ * Recherche parmi tous les licenciés du département, par nom, prénom, licence ou adresse.
+ *
+ * Réservée à l'administrateur : c'est la seule vue qui traverse tous les clubs. Un
+ * responsable garde les licenciés de son club et l'effectif de ses équipes.
+ *
+ * La table est lue en entier, sans index. C'est assumé : elle contient les licenciés d'un
+ * seul département — quelques centaines de fiches — et cette page d'administration n'est pas
+ * un chemin critique. Le jour où le volume change, un index de recherche Convex prendra le
+ * relais.
+ */
+export const search = query({
+  args: { term: v.string() },
+  returns: v.object({
+    players: v.array(
+      v.object({
+        _id: v.id("players"),
+        firstName: v.string(),
+        lastName: v.string(),
+        licenseNumber: v.string(),
+        email: v.union(v.string(), v.null()),
+        clubId: v.id("clubs"),
+        clubName: v.string(),
+        hasAccount: v.boolean(),
+        teamNames: v.array(v.string()),
+      }),
+    ),
+    total: v.number(),
+    truncated: v.boolean(),
+  }),
+  handler: async (ctx, { term }) => {
+    await requireAdmin(ctx);
+    // Les clubs sont résolus avant le filtrage : un administrateur cherche aussi par club, et
+    // ils sont trop peu nombreux pour que ça coûte quoi que ce soit.
+    const clubNames = new Map(
+      (await ctx.db.query("clubs").withIndex("by_name").collect()).map((club) => [
+        String(club._id),
+        club.name,
+      ]),
+    );
+    const all = await ctx.db.query("players").collect();
+    const matching = all.filter((player) =>
+      matchesPlayer(
+        { ...player, clubName: clubNames.get(String(player.clubId)) ?? "" },
+        term,
+      ),
+    );
+    matching.sort(
+      (a, b) =>
+        a.lastName.localeCompare(b.lastName, "fr") ||
+        a.firstName.localeCompare(b.firstName, "fr"),
+    );
+
+    const page = matching.slice(0, SEARCH_LIMIT);
+    const players = await Promise.all(
+      page.map(async (player) => {
+        const account =
+          player.email === undefined
+            ? null
+            : await ctx.db
+                .query("users")
+                .withIndex("email", (q) => q.eq("email", player.email))
+                .first();
+        const entries = await ctx.db
+          .query("rosterEntries")
+          .withIndex("by_player", (q) => q.eq("playerId", player._id))
+          .collect();
+        const teams = await Promise.all(entries.map((entry) => ctx.db.get(entry.teamId)));
+        return {
+          _id: player._id,
+          firstName: player.firstName,
+          lastName: player.lastName,
+          licenseNumber: player.licenseNumber,
+          email: player.email ?? null,
+          clubId: player.clubId,
+          clubName: clubNames.get(String(player.clubId)) ?? "",
+          hasAccount: account !== null,
+          teamNames: teams
+            .filter((team): team is NonNullable<typeof team> => team !== null)
+            .map((team) => team.name)
+            .sort((a, b) => a.localeCompare(b, "fr")),
+        };
+      }),
+    );
+
+    return { players, total: matching.length, truncated: matching.length > SEARCH_LIMIT };
   },
 });

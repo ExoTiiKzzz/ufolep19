@@ -50,7 +50,13 @@ export default function AdminPage() {
           Saisons
         </Link>
         <Link href="/administration/clubs" className={buttonVariants({ variant: "outline" })}>
-          Clubs et licenciés
+          Clubs
+        </Link>
+        <Link
+          href="/administration/licencies"
+          className={buttonVariants({ variant: "outline" })}
+        >
+          Licenciés
         </Link>
         <Link href="/administration/comptes" className={buttonVariants({ variant: "outline" })}>
           Comptes et rôles
