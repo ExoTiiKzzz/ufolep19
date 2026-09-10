@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/table";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
+import { accountNotice } from "@/lib/account-notice";
 import { uploadLogo } from "@/lib/upload-logo";
 
 export default function ClubsPage() {
@@ -44,32 +45,6 @@ export default function ClubsPage() {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Action impossible.");
     }
-  }
-
-  /** Message à afficher après la création d'un licencié, selon son compte et l'envoi. */
-  function accountNotice(
-    account: {
-      email: string;
-      temporaryPassword: string | null;
-      linkedExisting: boolean;
-      mail: { sent: boolean; error: string | null } | null;
-    } | null,
-  ) {
-    if (account === null) {
-      return "Licencié créé.";
-    }
-    if (account.linkedExisting) {
-      return `Licencié créé et rattaché au compte existant ${account.email}.`;
-    }
-    if (account.mail?.sent === true) {
-      return `Licencié créé. Ses identifiants viennent de lui être envoyés à ${account.email}.`;
-    }
-    return (
-      `Licencié créé, avec un compte pour ${account.email}. ` +
-      `Le message n'est pas parti (${account.mail?.error ?? "raison inconnue"}) : ` +
-      `transmettez-lui son mot de passe provisoire ${account.temporaryPassword}, ` +
-      "il ne sera plus affiché."
-    );
   }
 
   return (
@@ -255,7 +230,7 @@ export default function ClubsPage() {
                           email: String(form.get("email")),
                         });
                         element.reset();
-                        setNotice(accountNotice(account));
+                        setNotice(accountNotice("Licencié créé.", account));
                       });
                     }}
                   >

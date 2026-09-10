@@ -22,6 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { api } from "@/convex/_generated/api";
+import { accountNotice } from "@/lib/account-notice";
 import type { Id } from "@/convex/_generated/dataModel";
 
 export default function TeamPage() {
@@ -303,16 +304,7 @@ export default function TeamPage() {
                     await addToRoster({ teamId, playerId });
                     element.reset();
                     setNotice(
-                      account === null
-                        ? "Joueur créé et ajouté à l'effectif."
-                        : account.linkedExisting
-                          ? `Joueur ajouté, et rattaché au compte existant ${account.email}.`
-                          : account.mail?.sent === true
-                            ? `Joueur ajouté. Ses identifiants viennent de lui être envoyés à ${account.email}.`
-                            : `Joueur ajouté, avec un compte pour ${account.email}. ` +
-                              `Le message n'est pas parti (${account.mail?.error ?? "raison inconnue"}) : ` +
-                              `transmettez-lui son mot de passe provisoire ${account.temporaryPassword}, ` +
-                              "il ne sera plus affiché.",
+                      accountNotice("Joueur créé et ajouté à l'effectif.", account),
                     );
                   });
                 }}
