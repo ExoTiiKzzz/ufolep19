@@ -197,6 +197,15 @@ numéro ou à un autre, et la précédente reste dans l'historique avec ses date
 - Un numéro ne peut pas être porté par **deux joueurs différents**. Le même joueur peut en
   revanche le reprendre d'une saison sur l'autre : une reconduction au même numéro n'est pas un
   doublon.
+- Un numéro est **alphanumérique** : il porte des lettres autant que des chiffres. Rien ne borne
+  sa forme — pas de longueur imposée, pas de motif — parce que la fédération en change et qu'un
+  format refusé à la saisie empêche d'enregistrer une carte pourtant valide.
+
+La casse, en revanche, ne distingue rien : `ab1234` et `AB1234` sont la même carte. Les numéros
+sont donc **rangés en majuscules** par `normalizeLicenseNumber`, par où passent toutes les
+écritures. C'est une normalisation à l'écriture et non une comparaison sans casse à la lecture,
+pour que l'index `by_number` reste utilisable — l'unicité se vérifie par égalité exacte, et sans
+ça la même licence saisie différemment par deux clubs passerait pour deux numéros.
 
 **La validité se juge à la date du match, jamais à celle de la saisie.** Une feuille transcrite
 trois jours plus tard ne peut pas rejeter un joueur régulièrement licencié le jour où il a joué ;

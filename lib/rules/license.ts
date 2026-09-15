@@ -57,9 +57,20 @@ export function latestLicense<T extends LicensePeriod>(licenses: T[]): T | null 
   );
 }
 
-/** Numéro de licence normalisé : espaces rognés, casse d'origine conservée. */
+/**
+ * Numéro de licence normalisé : espaces rognés, **passé en majuscules**.
+ *
+ * Un numéro peut porter des lettres autant que des chiffres. La casse n'y distingue rien —
+ * `ab1234` et `AB1234` sont la même carte — mais l'unicité d'un numéro se vérifie par
+ * égalité exacte sur un index. Sans cette normalisation, la même licence saisie en
+ * minuscules par un club et en majuscules par un autre passerait pour deux numéros
+ * différents, et l'invariant « un numéro, un seul licencié » tomberait sans bruit.
+ *
+ * Normaliser à l'écriture plutôt que comparer sans casse à la lecture : c'est le seul moyen
+ * que l'index `by_number` reste utilisable, et que l'écran affiche partout le même numéro.
+ */
 export function normalizeLicenseNumber(value: string): string {
-  return value.trim();
+  return value.trim().toUpperCase();
 }
 
 /**

@@ -4,6 +4,7 @@ import {
   coversInstant,
   latestLicense,
   licenseCovering,
+  normalizeLicenseNumber,
   periodsOverlap,
   validateLicense,
   type LicensePeriod,
@@ -122,5 +123,24 @@ describe("validation d'une licence à enregistrer", () => {
       validUntil: parisWallClock(2026, 8, 31, 23, 59, 59, 999),
     };
     expect(validateLicense(base, [previous])).toBe(null);
+  });
+});
+
+describe("normalisation d'un numéro", () => {
+  test("garde les lettres autant que les chiffres", () => {
+    expect(normalizeLicenseNumber("AB1234CD")).toBe("AB1234CD");
+    expect(normalizeLicenseNumber("19-VB-0042")).toBe("19-VB-0042");
+  });
+
+  test("rogne les espaces et passe en majuscules", () => {
+    // La casse ne distingue rien sur une carte de licence, alors que l'unicité se vérifie
+    // par égalité exacte : « ab1234 » et « AB1234 » doivent se ranger au même numéro.
+    expect(normalizeLicenseNumber("  ab1234  ")).toBe("AB1234");
+    expect(normalizeLicenseNumber("ab1234")).toBe(normalizeLicenseNumber("AB1234"));
+  });
+
+  test("laisse un numéro purement numérique intact", () => {
+    // Le cas d'avant l'ouverture aux lettres : rien ne doit bouger pour lui.
+    expect(normalizeLicenseNumber("0042")).toBe("0042");
   });
 });
