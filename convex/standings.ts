@@ -25,6 +25,7 @@ export const byChampionship = query({
       setsLost: v.number(),
       pointsFor: v.number(),
       pointsAgainst: v.number(),
+      forfeits: v.number(),
       points: v.number(),
     }),
   ),
@@ -51,6 +52,7 @@ export const byChampionship = query({
               awaySets: match.result.awaySets,
               homePoints: match.result.homePoints,
               awayPoints: match.result.awayPoints,
+              forfeitAgainst: match.forfeitAgainst ?? null,
             },
           ],
     );

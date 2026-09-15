@@ -240,8 +240,8 @@ Un forfait est **prononcé par un administrateur** — jamais déduit automatiqu
 d'une composition. Il termine le match sur un score conventionnel :
 
 - **3-0 en sets**, chaque set à **25-0** (donc 75-0 en points marqués) ;
-- **0 point de classement** pour l'équipe défaillante, le barème normal s'appliquant au vainqueur
-  (3 points).
+- **0 point de classement** pour l'équipe défaillante au premier forfait, puis une pénalité
+  croissante (voir « Classement ») ; le vainqueur marque ses 3 points de victoire.
 
 ## Classement
 
@@ -249,14 +249,32 @@ Un classement est calculé **par championnat**, dérivé des matchs terminés (j
 état modifiable à la main). Il expose par équipe : matchs joués, victoires, défaites, sets
 gagnés/perdus, points marqués/encaissés, et le total de points de classement.
 
-Barème :
+Barème, propre à l'UFOLEP 19 — **ce n'est pas celui de la FIVB**, et il ne doit pas y être
+ramené :
 
 | Résultat | Points |
 | --- | --- |
-| Victoire 3-0 ou 3-1 | **3** |
-| Victoire 3-2 | **2** |
-| Défaite 2-3 | **1** |
-| Défaite 0-3 ou 1-3 | **0** |
+| Victoire, quel qu'en soit le score | **3** |
+| Défaite 2-3 | **2** |
+| Toute autre défaite | **1** |
+| Forfait | **0** |
+| 2ème forfait | **-1** |
+| 3ème forfait et au-delà | **-2** |
+
+Deux choses s'y lisent. **Toute victoire vaut pareil** : gagner 3-0 ou 3-2 ne change rien.
+Et **une défaite rapporte toujours quelque chose** — l'équipe s'est déplacée et a joué ; c'est
+le forfait, et lui seul, qui ne rapporte rien. La défaite en cinq sets vaut un point de plus
+parce qu'elle s'est jouée à un set près.
+
+Le forfait est donc le seul résultat qui **retire** des points, et sa pénalité s'aggrave d'un
+forfait à l'autre. Elle plafonne à -2 : au-delà, le classement a déjà dit ce qu'il avait à dire.
+Chaque forfait porte sa propre valeur et elles s'additionnent — trois forfaits font
+`0 + (-1) + (-2) = -3`, et un total de points **peut être négatif**.
+
+Le total ne dépend que du **nombre** de forfaits d'une équipe, jamais de leur ordre : les
+valeurs étant attribuées par rang, la somme est la même quel que soit l'ordre de lecture des
+matchs. C'est ce qui dispense `computeStandings` de trier par date, et un test protège cette
+propriété — sans elle, le calcul dépendrait d'un ordre que rien ne garantit.
 
 Départage, dans cet ordre :
 

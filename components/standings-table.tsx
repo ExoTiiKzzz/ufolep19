@@ -2,6 +2,7 @@ import type { FunctionReturnType } from "convex/server";
 import Link from "next/link";
 
 import { ClubLogo } from "@/components/club-logo";
+import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -47,6 +48,17 @@ export function StandingsTable({ rows }: { rows: Row[] }) {
                   {row.teamName}
                 </Link>
                 <span className="text-muted-foreground font-normal">· {row.clubName}</span>
+                {/*
+                 * Les forfaits retirent des points, jusqu'à rendre un total négatif. Sans
+                 * cette mention, la colonne « Pts » afficherait un nombre inexplicable —
+                 * et on chercherait l'erreur dans le calcul. Gris : c'est une information
+                 * neutre sur un classement public, pas une mise au pilori.
+                 */}
+                {row.forfeits === 0 ? null : (
+                  <Badge variant="muted" className="font-normal">
+                    {row.forfeits} forfait{row.forfeits > 1 ? "s" : ""}
+                  </Badge>
+                )}
               </span>
             </TableCell>
             <TableCell className="text-right">{row.played}</TableCell>

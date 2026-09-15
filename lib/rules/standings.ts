@@ -4,9 +4,12 @@
  * Module pur : le classement est dérivé des matchs terminés, jamais stocké comme état
  * modifiable à la main.
  *
- * Barème : 3 points pour une victoire 3-0 ou 3-1, 2 pour une victoire 3-2, 1 pour une
- * défaite 2-3, 0 pour une défaite 0-3 ou 1-3. Le vainqueur par forfait marque 3 points,
- * l'équipe défaillante 0.
+ * Barème UFOLEP 19 : **3 points pour toute victoire**, quel qu'en soit le score ; 2 points
+ * pour une défaite 2-3, qui a coûté cinq sets ; 1 point pour toute autre défaite. Une équipe
+ * qui se déplace et perd sèchement marque donc quand même — c'est la présence qui est
+ * récompensée, pas seulement le résultat.
+ *
+ * Le forfait sort de ce barème et s'aggrave : voir `pointsForForfeit`.
  */
 export type MatchOutcome = {
   homeTeamId: string;
@@ -15,6 +18,14 @@ export type MatchOutcome = {
   awaySets: number;
   homePoints: number;
   awayPoints: number;
+  /**
+   * Équipe déclarée forfait, le cas échéant.
+   *
+   * Son barème n'est pas celui d'une défaite : un forfait ne rapporte rien, et les suivants
+   * retirent des points. Le score conventionnel (3-0, 25-0 par set) reste compté dans les
+   * sets et les points marqués, pour que les ratios de départage restent comparables.
+   */
+  forfeitAgainst?: string | null;
 };
 
 export type StandingRow = {
@@ -27,15 +38,41 @@ export type StandingRow = {
   setsLost: number;
   pointsFor: number;
   pointsAgainst: number;
+  /** Forfaits déclarés, qui expliquent un total de points en retrait — voire négatif. */
+  forfeits: number;
   points: number;
 };
 
-/** Points de classement d'une équipe selon les sets gagnés et perdus dans un match. */
+/**
+ * Points de classement d'une équipe selon les sets gagnés et perdus dans un match **joué**.
+ *
+ * Un match perdu rapporte toujours quelque chose : l'équipe s'est déplacée et a joué. Seule
+ * la défaite en cinq sets vaut mieux que les autres, parce qu'elle s'est jouée à un set.
+ * Un forfait ne passe pas par ici — il n'a pas été joué, et `pointsForForfeit` le traite.
+ */
 export function pointsForResult(setsWon: number, setsLost: number): number {
-  if (setsWon === 3) {
-    return setsLost <= 1 ? 3 : 2;
+  if (setsWon > setsLost) {
+    return 3;
   }
-  return setsWon === 2 ? 1 : 0;
+  return setsWon === 2 ? 2 : 1;
+}
+
+/**
+ * Points du `n`-ième forfait d'une même équipe dans le championnat, `n` commençant à 1.
+ *
+ * Le premier ne rapporte rien, le deuxième retire un point, le troisième deux, et la
+ * pénalité s'arrête là : au-delà, le classement a déjà dit ce qu'il avait à dire, et
+ * creuser sans fin ne sanctionne plus, ça humilie.
+ *
+ * L'ordre des forfaits n'a pas à être connu : le total d'une équipe ne dépend que de leur
+ * **nombre**, puisque les valeurs sont attribuées par rang. Inutile donc de trier les matchs
+ * par date avant de calculer — et inutile de « corriger » ça plus tard.
+ */
+export function pointsForForfeit(rank: number): number {
+  if (rank <= 1) {
+    return 0;
+  }
+  return rank === 2 ? -1 : -2;
 }
 
 /**
@@ -66,6 +103,7 @@ export function computeStandings(
       setsLost: 0,
       pointsFor: 0,
       pointsAgainst: 0,
+      forfeits: 0,
       points: 0,
     });
   }
@@ -102,7 +140,22 @@ export function computeStandings(
       row.setsLost += side.setsLost;
       row.pointsFor += side.pointsFor;
       row.pointsAgainst += side.pointsAgainst;
-      row.points += pointsForResult(side.setsWon, side.setsLost);
+
+      // L'équipe défaillante est mise de côté : ses points dépendent du nombre de forfaits
+      // qu'elle aura accumulés en fin de compte, pas de ce match pris isolément. Son
+      // adversaire, lui, a gagné — le barème ordinaire lui donne ses 3 points.
+      if (side.teamId === outcome.forfeitAgainst) {
+        row.forfeits++;
+      } else {
+        row.points += pointsForResult(side.setsWon, side.setsLost);
+      }
+    }
+  }
+
+  // Les forfaits une fois tous connus : le n-ième vaut ce que vaut son rang.
+  for (const row of rows.values()) {
+    for (let rank = 1; rank <= row.forfeits; rank++) {
+      row.points += pointsForForfeit(rank);
     }
   }
 
