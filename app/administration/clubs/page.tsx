@@ -5,6 +5,10 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { ClubLogoForm } from "@/components/club-logo-form";
+import { LicenseBadge } from "@/components/license-badge";
+import { LicenseFields, readLicenseFields } from "@/components/license-fields";
+import { errorMessage } from "@/lib/errors";
+import { LICENSE_FIELDS_ERROR } from "@/lib/license-messages";
 import { ClubLogo } from "@/components/club-logo";
 import { LogoPicker } from "@/components/logo-picker";
 import { Button } from "@/components/ui/button";
@@ -43,7 +47,7 @@ export default function ClubsPage() {
     try {
       await action();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Action impossible.");
+      setError(errorMessage(caught, "Action impossible."));
     }
   }
 
@@ -201,8 +205,8 @@ export default function ClubsPage() {
                           <TableCell className="font-medium">
                             {player.lastName.toUpperCase()} {player.firstName}
                           </TableCell>
-                          <TableCell className="text-muted-foreground">
-                            {player.licenseNumber || "—"}
+                          <TableCell>
+                            <LicenseBadge license={player.license} />
                           </TableCell>
                           <TableCell className="text-muted-foreground">
                             {player.email ?? "—"}
@@ -221,12 +225,17 @@ export default function ClubsPage() {
                       event.preventDefault();
                       const form = new FormData(event.currentTarget);
                       const element = event.currentTarget;
+                      const license = readLicenseFields(form, `${club._id}-`);
+                      if (license === "invalid") {
+                        setError(LICENSE_FIELDS_ERROR);
+                        return;
+                      }
                       await guard(async () => {
                         const { account } = await createPlayer({
                           clubId: club._id,
                           firstName: String(form.get("firstName")),
                           lastName: String(form.get("lastName")),
-                          licenseNumber: String(form.get("licenseNumber")),
+                          license,
                           email: String(form.get("email")),
                         });
                         element.reset();
@@ -242,10 +251,7 @@ export default function ClubsPage() {
                       <Label htmlFor={`fn-${club._id}`}>Prénom</Label>
                       <Input id={`fn-${club._id}`} name="firstName" className="mt-2" required />
                     </div>
-                    <div>
-                      <Label htmlFor={`lic-${club._id}`}>Licence</Label>
-                      <Input id={`lic-${club._id}`} name="licenseNumber" className="mt-2" />
-                    </div>
+                    <LicenseFields prefix={`${club._id}-`} />
                     <div className="min-w-56 flex-1">
                       <Label htmlFor={`mail-${club._id}`}>E-mail (facultatif)</Label>
                       <Input

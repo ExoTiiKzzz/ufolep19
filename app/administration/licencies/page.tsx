@@ -4,6 +4,10 @@ import { useAction, useQuery } from "convex/react";
 import Link from "next/link";
 import { useState } from "react";
 
+import { LicenseBadge } from "@/components/license-badge";
+import { LicenseFields, readLicenseFields } from "@/components/license-fields";
+import { errorMessage } from "@/lib/errors";
+import { LICENSE_FIELDS_ERROR } from "@/lib/license-messages";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -82,19 +86,24 @@ export default function LicenseesPage() {
                 const element = event.currentTarget;
                 setError(null);
                 setNotice(null);
+                const license = readLicenseFields(form);
+                if (license === "invalid") {
+                  setError(LICENSE_FIELDS_ERROR);
+                  return;
+                }
                 try {
                   const { account } = await createPlayer({
                     clubId: String(form.get("clubId")) as Id<"clubs">,
                     firstName: String(form.get("firstName")),
                     lastName: String(form.get("lastName")),
-                    licenseNumber: String(form.get("licenseNumber")),
+                    license,
                     email: String(form.get("email")),
                   });
                   element.reset();
                   setNotice(accountNotice("Licencié créé.", account));
                 } catch (caught) {
                   setError(
-                    caught instanceof Error ? caught.message : "Création impossible.",
+                    errorMessage(caught, "Création impossible."),
                   );
                 }
               }}
@@ -118,10 +127,7 @@ export default function LicenseesPage() {
                 <Label htmlFor="firstName">Prénom</Label>
                 <Input id="firstName" name="firstName" className="mt-2" required />
               </div>
-              <div>
-                <Label htmlFor="licenseNumber">Licence</Label>
-                <Input id="licenseNumber" name="licenseNumber" className="mt-2" />
-              </div>
+              <LicenseFields />
               <div className="min-w-52 flex-1">
                 <Label htmlFor="email">E-mail (facultatif)</Label>
                 <Input id="email" name="email" type="email" className="mt-2" />
@@ -194,8 +200,8 @@ export default function LicenseesPage() {
                       {player.clubName}
                     </Link>
                   </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {player.licenseNumber || "—"}
+                  <TableCell>
+                    <LicenseBadge license={player.license} />
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {player.teamNames.length === 0 ? "—" : player.teamNames.join(", ")}

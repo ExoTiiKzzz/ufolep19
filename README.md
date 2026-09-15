@@ -20,6 +20,7 @@ Vitest + `convex-test`.
 | --- | --- |
 | `npm run dev` | Serveur de développement Next.js sur http://localhost:3000 |
 | `npm run dev:convex` | Backend Convex en mode développement : pousse le schéma et les fonctions, régénère `convex/_generated/`, et surveille les changements |
+| `npm run seed:dev` | Jeu de données de développement : purge le précédent, recrée comptes, championnat et matchs (voir « Jeu de données de développement ») |
 | `npm test` | Suite de tests (Vitest, une passe) |
 | `npm run test:watch` | Suite de tests en surveillance |
 | `npm run typecheck` | Vérification TypeScript sans émission |
@@ -62,6 +63,54 @@ un mot de passe de 8 caractères minimum.
 Le rôle (`player`, `manager`, `admin`) est un attribut unique du compte. Chaque fonction Convex
 revérifie le rôle de l'appelant via les helpers de `convex/authz.ts` — l'UI masque ce qui n'est pas
 permis, mais ne fait jamais autorité.
+
+## Jeu de données de développement
+
+```bash
+npm run seed:dev
+```
+
+Écrit de quoi parcourir le cycle de vie d'un match à deux comptes, sur le déploiement pointé par
+`CONVEX_DEPLOYMENT`. **À ne lancer qu'en développement** : le mot de passe des comptes est en clair
+dans la sortie de la commande.
+
+| Compte | Rôle | Équipe |
+| --- | --- | --- |
+| `admin@dev.ufolep19.test` | `admin` | — |
+| `tulle@dev.ufolep19.test` | `manager` | Tulle 1 |
+| `brive@dev.ufolep19.test` | `manager` | Brive 1 |
+
+Mot de passe commun `ufolep19dev`, remplaçable :
+`npx convex run seed:dev '{"password":"..."}'`.
+
+Les deux équipes s'affrontent deux fois, dans un championnat de la saison courante, avec huit
+licenciés chacune à l'effectif :
+
+- **Journée 1**, fenêtre fermée — Tulle reçoit, le créneau est passé : le responsable de Tulle doit
+  **saisir la feuille de match**, celui de Brive la validera.
+- **Journée 2**, fenêtre ouverte aujourd'hui — Brive reçoit, aucun créneau : le responsable de
+  Brive doit **proposer un créneau**, celui de Tulle l'acceptera ou le refusera.
+
+La commande est **rejouable** : chaque exécution supprime d'abord le jeu précédent. Pour que cette
+purge ne morde pas sur des données saisies à la main, tout ce qu'elle crée est marqué — saisons et
+clubs suffixés `(dev)`, comptes sur le domaine réservé `dev.ufolep19.test`, licences préfixées
+`DEV-`. Rien d'autre n'est touché, à une exception assumée : la saison du jeu devient la **saison
+courante**, ce qui démet celle qui l'était.
+
+## Migration des licences
+
+Les fiches licenciés portaient un numéro unique sans dates. Le modèle est désormais une
+**suite de licences** par joueur, chacune valable sur une période (voir « Licences » dans
+[AGENTS.md](./AGENTS.md)). La reprise des données existantes est explicite :
+
+```bash
+npx convex run licenses:migrate '{"validFrom":"2025-09-01","validUntil":"2026-08-31"}'
+```
+
+Les dates sont **obligatoires** : l'ancien modèle n'en portait aucune, et les deviner
+déciderait à la place de l'utilisateur qui a le droit de jouer. La commande est rejouable, et
+une fiche déjà migrée est ignorée. Le déploiement de développement a été migré le
+15 septembre 2026 sur la saison 2026-2027.
 
 ## Structure
 

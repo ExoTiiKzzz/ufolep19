@@ -1,6 +1,7 @@
 import { ConvexError, v } from "convex/values";
 
 import { forfeitScore, validateMatchScore, type SetScore } from "../lib/rules/score";
+import { parisParts } from "../lib/rules/paris-time";
 import { sheetTacitDeadline } from "../lib/rules/tacit";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -12,6 +13,7 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 import { requireAdmin } from "./authz";
+import { newLicenseCache, statusAt, type LicenseCache } from "./licenses";
 import { actorFor, sidesOf, transitionTo } from "./negotiation";
 
 type Ctx = QueryCtx | MutationCtx;
@@ -57,12 +59,19 @@ function resultFrom(match: Doc<"matches">, sets: SetScore[]) {
  * Au plus 12 joueurs, **aucun minimum** : jouer en sous-effectif est un désavantage
  * sportif, pas un motif de forfait. Une composition vide est en revanche refusée : c'est
  * une feuille non remplie.
+ *
+ * Chaque joueur doit être **licencié à la date du match**, `playedAt` — et non à l'instant
+ * de la saisie. Une feuille transcrite trois jours plus tard ne peut pas rejeter un joueur
+ * régulièrement licencié le jour où il a joué, et à l'inverse une licence renouvelée après
+ * coup ne régularise pas un match déjà joué.
  */
 async function checkLineup(
   ctx: MutationCtx,
   teamId: Id<"teams">,
   playerIds: Id<"players">[],
   label: string,
+  playedAt: number,
+  licenses: LicenseCache,
 ) {
   if (playerIds.length === 0) {
     throw new ConvexError(
@@ -78,19 +87,35 @@ async function checkLineup(
     throw new ConvexError(`Composition ${label} : un joueur y figure deux fois.`);
   }
   for (const playerId of playerIds) {
+    const player = await ctx.db.get(playerId);
+    const who = player === null ? "Ce joueur" : `${player.firstName} ${player.lastName}`;
+
     const entry = await ctx.db
       .query("rosterEntries")
       .withIndex("by_team_and_player", (q) => q.eq("teamId", teamId).eq("playerId", playerId))
       .unique();
     if (entry === null) {
-      const player = await ctx.db.get(playerId);
-      const who =
-        player === null ? "Ce joueur" : `${player.firstName} ${player.lastName}`;
       throw new ConvexError(
         `${who} n'appartient pas à l'effectif de l'équipe (composition ${label}).`,
       );
     }
+
+    const license = await statusAt(ctx, playerId, playedAt, licenses);
+    if (!license.isValid) {
+      throw new ConvexError(
+        license.validUntil === null
+          ? `${who} n'a aucune licence : il ne peut pas être aligné (composition ${label}).`
+          : `La licence de ${who} ne couvre pas la date du match — elle expirait le ` +
+            `${formatLicenseDate(license.validUntil)} (composition ${label}).`,
+      );
+    }
   }
+}
+
+/** Date en clair dans un message d'erreur : « 9 septembre 2026 », en heure de Paris. */
+function formatLicenseDate(at: number): string {
+  const { year, month, day } = parisParts(at);
+  return `${day}/${String(month).padStart(2, "0")}/${year}`;
 }
 
 /**
@@ -122,8 +147,9 @@ export const submit = mutation({
     // Le score est validé avant les compositions : c'est l'erreur la plus fréquente.
     const result = resultFrom(match, args.sets);
 
-    await checkLineup(ctx, match.homeTeamId, args.homeLineup, "receveur");
-    await checkLineup(ctx, match.awayTeamId, args.awayLineup, "visiteur");
+    const licenses = newLicenseCache();
+    await checkLineup(ctx, match.homeTeamId, args.homeLineup, "receveur", match.slot.at, licenses);
+    await checkLineup(ctx, match.awayTeamId, args.awayLineup, "visiteur", match.slot.at, licenses);
     const both = args.homeLineup.filter((playerId) => args.awayLineup.includes(playerId));
     if (both.length > 0) {
       throw new ConvexError(

@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { api } from "@/convex/_generated/api";
 import { formatCountdown, formatDateTime } from "@/lib/format";
 import { todoLabels } from "@/lib/labels";
+import { cn } from "@/lib/utils";
 
 export default function DashboardPage() {
   const account = useQuery(api.users.me);
@@ -39,10 +40,32 @@ export default function DashboardPage() {
     <main className="mx-auto max-w-3xl px-6 py-10">
       <h1 className="text-2xl font-semibold tracking-tight">Tableau de bord</h1>
 
-      <Card className="mt-6">
-        <CardHeader>
-          <CardTitle className="text-base">À traiter</CardTitle>
-          <CardDescription>
+      <Card className="mt-6 overflow-hidden">
+        {/*
+         * L'en-tête passe au jaune tant qu'il reste quelque chose à faire : sans
+         * notification par e-mail (ADR-0002), c'est le seul signal qu'on ait, et le jaune
+         * est justement la couleur de ce qui attend une action. Il porte sa bordure, comme
+         * tout aplat jaune : sur une carte blanche il n'a qu'un rapport de 1,6 avec le fond.
+         */}
+        <CardHeader
+          className={cn(
+            "-mt-6 py-4",
+            actionable.length === 0
+              ? null
+              : "bg-secondary text-secondary-foreground border-secondary-border border-b",
+          )}
+        >
+          <CardTitle className="flex items-center gap-2 text-base">
+            À traiter
+            {actionable.length === 0 ? null : (
+              <span className="bg-secondary-foreground text-secondary rounded-full px-2 text-sm font-semibold">
+                {actionable.length}
+              </span>
+            )}
+          </CardTitle>
+          <CardDescription
+            className={actionable.length === 0 ? undefined : "text-secondary-foreground"}
+          >
             Aucune notification n&apos;est envoyée : c&apos;est ici que vous voyez ce qui attend
             votre action.
           </CardDescription>

@@ -77,18 +77,36 @@ export default defineSchema({
 
   // Joueur : fiche d'un licencié, rattachée à un club. Traverse les saisons. Existe sans
   // compte utilisateur : c'est une donnée d'effectif, pas un utilisateur.
+  //
+  // La fiche ne porte **pas** de numéro de licence : un licencié en change au fil des
+  // saisons, et l'historique fait partie du modèle. Voir la table `licenses`.
   players: defineTable({
     clubId: v.id("clubs"),
     firstName: v.string(),
     lastName: v.string(),
-    licenseNumber: v.string(),
     // Facultatif. Renseigné, il permet de créer un compte de consultation rattaché à la
     // fiche. Donnée personnelle : jamais renvoyée par une query publique.
     email: v.optional(v.string()),
   })
     .index("by_club", ["clubId"])
-    .index("by_license", ["licenseNumber"])
     .index("by_email", ["email"]),
+
+  // Licence : un numéro et la période pendant laquelle il autorise à jouer.
+  //
+  // Un joueur en accumule une par saison, parfois sous un numéro différent : la table est
+  // un **historique**, jamais réécrit sur place. Les périodes d'un même joueur ne se
+  // chevauchent pas — sinon « la licence du 10 septembre » n'aurait pas de réponse unique —
+  // mais elles peuvent laisser un trou, pour le licencié qui s'interrompt une saison.
+  licenses: defineTable({
+    playerId: v.id("players"),
+    number: v.string(),
+    validFrom: v.number(),
+    // Dernier instant de validité : la fin de la journée, pas son début. Une licence
+    // « valable jusqu'au 9 septembre » couvre le 9 au soir, et plus rien le 10.
+    validUntil: v.number(),
+  })
+    .index("by_player", ["playerId"])
+    .index("by_number", ["number"]),
 
   // Championnat : compétition d'une saison, regroupant N équipes engagées.
   championships: defineTable({

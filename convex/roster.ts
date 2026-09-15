@@ -3,34 +3,46 @@ import { ConvexError, v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import { requireManagerOfTeam, requireUser } from "./authz";
+import { licenseStatus, newLicenseCache, statusAt } from "./licenses";
 
 const rosterPlayer = v.object({
   _id: v.id("players"),
   firstName: v.string(),
   lastName: v.string(),
-  licenseNumber: v.string(),
+  license: licenseStatus,
 });
 
-/** Effectif d'une équipe. Nominatif : réservé aux comptes connectés. */
+/**
+ * Effectif d'une équipe, avec l'état de licence de chacun. Nominatif : réservé aux comptes
+ * connectés.
+ *
+ * `at` est la date à laquelle juger la validité — celle du match qu'on prépare, et non
+ * l'instant de la requête. Sans elle, la composition d'un match joué la semaine dernière
+ * signalerait à tort les licences expirées depuis.
+ */
 export const listByTeam = query({
-  args: { teamId: v.id("teams") },
+  args: { teamId: v.id("teams"), at: v.optional(v.number()) },
   returns: v.array(rosterPlayer),
-  handler: async (ctx, { teamId }) => {
+  handler: async (ctx, { teamId, at }) => {
     await requireUser(ctx);
     const entries = await ctx.db
       .query("rosterEntries")
       .withIndex("by_team", (q) => q.eq("teamId", teamId))
       .collect();
     const players = await Promise.all(entries.map((entry) => ctx.db.get(entry.playerId)));
-    return players
-      .filter((p): p is NonNullable<typeof p> => p !== null)
-      .map((p) => ({
-        _id: p._id,
-        firstName: p.firstName,
-        lastName: p.lastName,
-        licenseNumber: p.licenseNumber,
-      }))
-      .sort((a, b) => a.lastName.localeCompare(b.lastName, "fr"));
+    const on = at ?? Date.now();
+    const cache = newLicenseCache();
+    const rows = await Promise.all(
+      players
+        .filter((p): p is NonNullable<typeof p> => p !== null)
+        .map(async (p) => ({
+          _id: p._id,
+          firstName: p.firstName,
+          lastName: p.lastName,
+          license: await statusAt(ctx, p._id, on, cache),
+        })),
+    );
+    return rows.sort((a, b) => a.lastName.localeCompare(b.lastName, "fr"));
   },
 });
 

@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/convex/_generated/api";
+import { errorMessage } from "@/lib/errors";
 import { formatDateTime } from "@/lib/format";
 import { stalledReasonLabels } from "@/lib/labels";
 
@@ -123,7 +124,7 @@ export default function AdminPage() {
                     });
                     element.reset();
                   } catch (caught) {
-                    setError(caught instanceof Error ? caught.message : "Action impossible.");
+                    setError(errorMessage(caught, "Action impossible."));
                   }
                 }}
               >

@@ -2,11 +2,18 @@ import { createAccount, getAuthUserId } from "@convex-dev/auth/server";
 import { ConvexError, v } from "convex/values";
 
 import { isPlausibleEmail, normalizeEmail } from "../lib/rules/email";
+import {
+  latestLicense,
+  licenseCovering,
+  normalizeLicenseNumber,
+  validateLicense,
+} from "../lib/rules/license";
 import { matchesPlayer } from "../lib/rules/player-search";
 import { internal } from "./_generated/api";
-import type { DataModel, Id } from "./_generated/dataModel";
+import type { DataModel, Doc, Id } from "./_generated/dataModel";
 import { action, internalMutation, query } from "./_generated/server";
 import { requireAdmin, requireManagerOfClubById, requireUser } from "./authz";
+import { license as licenseShape, licensesOf, licenseStatus, newLicenseCache, statusAt } from "./licenses";
 import { sendAccountCreated } from "./mail";
 import { matchSummary, newTeamCache, summarize } from "./matches";
 
@@ -16,8 +23,8 @@ const player = v.object({
   clubId: v.id("clubs"),
   firstName: v.string(),
   lastName: v.string(),
-  licenseNumber: v.string(),
   email: v.union(v.string(), v.null()),
+  license: licenseStatus,
 });
 
 /**
@@ -34,7 +41,19 @@ export const listByClub = query({
       .query("players")
       .withIndex("by_club", (q) => q.eq("clubId", clubId))
       .collect();
-    return players.map((player) => ({ ...player, email: player.email ?? null }));
+    const now = Date.now();
+    const cache = newLicenseCache();
+    return await Promise.all(
+      players.map(async (player) => ({
+        _id: player._id,
+        _creationTime: player._creationTime,
+        clubId: player.clubId,
+        firstName: player.firstName,
+        lastName: player.lastName,
+        email: player.email ?? null,
+        license: await statusAt(ctx, player._id, now, cache),
+      })),
+    );
   },
 });
 
@@ -48,7 +67,16 @@ export const insert = internalMutation({
     clubId: v.id("clubs"),
     firstName: v.string(),
     lastName: v.string(),
-    licenseNumber: v.string(),
+    // Licence initiale. Facultative : une fiche peut être ouverte avant que la licence
+    // soit délivrée — elle ne pourra simplement pas jouer tant qu'elle n'en a pas.
+    license: v.union(
+      v.object({
+        number: v.string(),
+        validFrom: v.number(),
+        validUntil: v.number(),
+      }),
+      v.null(),
+    ),
     email: v.union(v.string(), v.null()),
   },
   returns: v.id("players"),
@@ -56,17 +84,21 @@ export const insert = internalMutation({
     await requireManagerOfClubById(ctx, args.callerId, args.clubId);
     const firstName = args.firstName.trim();
     const lastName = args.lastName.trim();
-    const licenseNumber = args.licenseNumber.trim();
     if (firstName === "" || lastName === "") {
       throw new ConvexError("Le nom et le prénom du joueur sont obligatoires.");
     }
-    if (licenseNumber !== "") {
-      const existing = await ctx.db
-        .query("players")
-        .withIndex("by_license", (q) => q.eq("licenseNumber", licenseNumber))
+    if (args.license !== null) {
+      const number = normalizeLicenseNumber(args.license.number);
+      const error = validateLicense({ ...args.license, number }, []);
+      if (error !== null) {
+        throw new ConvexError(error);
+      }
+      const clash = await ctx.db
+        .query("licenses")
+        .withIndex("by_number", (q) => q.eq("number", number))
         .first();
-      if (existing !== null) {
-        throw new ConvexError(`Le numéro de licence ${licenseNumber} est déjà enregistré.`);
+      if (clash !== null) {
+        throw new ConvexError(`Le numéro de licence ${number} est déjà enregistré.`);
       }
     }
     if (args.email !== null) {
@@ -78,13 +110,21 @@ export const insert = internalMutation({
         throw new ConvexError(`L'adresse ${args.email} est déjà rattachée à un licencié.`);
       }
     }
-    return await ctx.db.insert("players", {
+    const playerId = await ctx.db.insert("players", {
       clubId: args.clubId,
       firstName,
       lastName,
-      licenseNumber,
       email: args.email ?? undefined,
     });
+    if (args.license !== null) {
+      await ctx.db.insert("licenses", {
+        playerId,
+        number: normalizeLicenseNumber(args.license.number),
+        validFrom: args.license.validFrom,
+        validUntil: args.license.validUntil,
+      });
+    }
+    return playerId;
   },
 });
 
@@ -128,7 +168,14 @@ export const create = action({
     clubId: v.id("clubs"),
     firstName: v.string(),
     lastName: v.string(),
-    licenseNumber: v.string(),
+    license: v.union(
+      v.object({
+        number: v.string(),
+        validFrom: v.number(),
+        validUntil: v.number(),
+      }),
+      v.null(),
+    ),
     email: v.optional(v.string()),
   },
   returns: v.object({
@@ -167,7 +214,7 @@ export const create = action({
       clubId: args.clubId,
       firstName: args.firstName,
       lastName: args.lastName,
-      licenseNumber: args.licenseNumber,
+      license: args.license,
       email,
     });
 
@@ -218,8 +265,11 @@ export const get = query({
       _id: v.id("players"),
       firstName: v.string(),
       lastName: v.string(),
-      licenseNumber: v.string(),
       email: v.union(v.string(), v.null()),
+      // État à aujourd'hui, et l'historique complet derrière : c'est la fiche où l'on vient
+      // renouveler une licence, elle doit montrer ce qui a précédé.
+      license: licenseStatus,
+      licenses: v.array(licenseShape),
       clubId: v.id("clubs"),
       clubName: v.string(),
       teams: v.array(
@@ -284,8 +334,9 @@ export const get = query({
       _id: player._id,
       firstName: player.firstName,
       lastName: player.lastName,
-      licenseNumber: player.licenseNumber,
       email: player.email ?? null,
+      license: await statusAt(ctx, playerId, Date.now()),
+      licenses: await licensesOf(ctx, playerId),
       clubId: player.clubId,
       clubName: club?.name ?? "",
       teams: teams
@@ -324,8 +375,8 @@ export const search = query({
         _id: v.id("players"),
         firstName: v.string(),
         lastName: v.string(),
-        licenseNumber: v.string(),
         email: v.union(v.string(), v.null()),
+        license: licenseStatus,
         clubId: v.id("clubs"),
         clubName: v.string(),
         hasAccount: v.boolean(),
@@ -345,10 +396,25 @@ export const search = query({
         club.name,
       ]),
     );
+    // Toutes les licences en une lecture, groupées par joueur : une requête indexée par
+    // fiche donnerait des centaines d'allers-retours là où la table entière tient déjà en
+    // mémoire, comme celle des joueurs juste au-dessus.
+    const licensesByPlayer = new Map<string, Doc<"licenses">[]>();
+    for (const row of await ctx.db.query("licenses").collect()) {
+      const key = String(row.playerId);
+      licensesByPlayer.set(key, [...(licensesByPlayer.get(key) ?? []), row]);
+    }
+
     const all = await ctx.db.query("players").collect();
     const matching = all.filter((player) =>
       matchesPlayer(
-        { ...player, clubName: clubNames.get(String(player.clubId)) ?? "" },
+        {
+          ...player,
+          licenseNumbers: (licensesByPlayer.get(String(player._id)) ?? []).map(
+            (row) => row.number,
+          ),
+          clubName: clubNames.get(String(player.clubId)) ?? "",
+        },
         term,
       ),
     );
@@ -358,6 +424,7 @@ export const search = query({
         a.firstName.localeCompare(b.firstName, "fr"),
     );
 
+    const now = Date.now();
     const page = matching.slice(0, SEARCH_LIMIT);
     const players = await Promise.all(
       page.map(async (player) => {
@@ -373,12 +440,20 @@ export const search = query({
           .withIndex("by_player", (q) => q.eq("playerId", player._id))
           .collect();
         const teams = await Promise.all(entries.map((entry) => ctx.db.get(entry.teamId)));
+        const rows = licensesByPlayer.get(String(player._id)) ?? [];
+        const covering = licenseCovering(rows, now);
+        const shown = covering ?? latestLicense(rows);
         return {
           _id: player._id,
           firstName: player.firstName,
           lastName: player.lastName,
-          licenseNumber: player.licenseNumber,
           email: player.email ?? null,
+          license: {
+            number: shown?.number ?? null,
+            validFrom: shown?.validFrom ?? null,
+            validUntil: shown?.validUntil ?? null,
+            isValid: covering !== null,
+          },
           clubId: player.clubId,
           clubName: clubNames.get(String(player.clubId)) ?? "",
           hasAccount: account !== null,

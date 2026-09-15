@@ -3,7 +3,7 @@ import { afterEach, expect, test, vi } from "vitest";
 
 import { api } from "./_generated/api";
 import schema from "./schema";
-import { modules, seedAccount, setupChampionship } from "./test.setup";
+import { modules, seedAccount, setupChampionship, testLicense } from "./test.setup";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -185,7 +185,7 @@ test("le rattachement d'un compte à une fiche joueur est facultatif", async () 
       clubId: s.homeClubId,
       firstName: "Camille",
       lastName: "Durand",
-      licenseNumber: "L0001",
+      license: testLicense("L0001"),
     }).then((result) => result.playerId);
 
   const asPlayer = t.withIdentity({ subject: player });
@@ -217,7 +217,7 @@ test("un licencié sans e-mail ne crée aucun compte", async () => {
     clubId: s.homeClubId,
     firstName: "Camille",
     lastName: "Durand",
-    licenseNumber: "L0001",
+    license: testLicense("L0001"),
   });
 
   expect(result.account).toBeNull();
@@ -235,7 +235,7 @@ test("un licencié avec e-mail reçoit un compte de consultation rattaché à sa
       clubId: s.homeClubId,
       firstName: "Camille",
       lastName: "Durand",
-      licenseNumber: "L0001",
+      license: testLicense("L0001"),
       email: "  Camille.Durand@Club-A.FR ",
     });
 
@@ -270,7 +270,7 @@ test("le compte créé pour un licencié n'a aucun droit d'écriture", async () 
       clubId: s.homeClubId,
       firstName: "Camille",
       lastName: "Durand",
-      licenseNumber: "L0001",
+      license: testLicense("L0001"),
       email: "camille@club-a.fr",
     });
   const created = (await t.withIdentity({ subject: s.admin }).query(api.users.list, {})).find(
@@ -299,7 +299,7 @@ test("une adresse déjà titulaire d'un compte est rattachée, pas dupliquée", 
       clubId: s.homeClubId,
       firstName: "Déjà",
       lastName: "Là",
-      licenseNumber: "L0002",
+      license: testLicense("L0002"),
       email: "deja@club-a.fr",
     });
 
@@ -317,7 +317,7 @@ test("une adresse déjà rattachée à un autre licencié est refusée", async (
     clubId: s.homeClubId,
     firstName: "Camille",
     lastName: "Durand",
-    licenseNumber: "L0001",
+    license: testLicense("L0001"),
     email: "camille@club-a.fr",
   });
 
@@ -326,7 +326,7 @@ test("une adresse déjà rattachée à un autre licencié est refusée", async (
       clubId: s.homeClubId,
       firstName: "Autre",
       lastName: "Personne",
-      licenseNumber: "L0002",
+      license: testLicense("L0002"),
       email: "camille@club-a.fr",
     }),
   ).rejects.toThrow(/déjà rattachée/i);
@@ -341,7 +341,7 @@ test("une adresse invraisemblable est refusée avant toute création", async () 
       clubId: s.homeClubId,
       firstName: "Camille",
       lastName: "Durand",
-      licenseNumber: "L0001",
+      license: testLicense("L0001"),
       email: "camille-at-club",
     }),
   ).rejects.toThrow(/adresse e-mail/i);
@@ -363,7 +363,7 @@ test("un responsable étranger au club ne peut pas créer de licencié", async (
       clubId: s.homeClubId,
       firstName: "Intrus",
       lastName: "Personne",
-      licenseNumber: "L9999",
+      license: testLicense("L9999"),
       email: "intrus@ailleurs.fr",
     }),
   ).rejects.toThrow(/ne gérez aucune équipe de ce club/i);
@@ -372,7 +372,7 @@ test("un responsable étranger au club ne peut pas créer de licencié", async (
       clubId: s.homeClubId,
       firstName: "Anonyme",
       lastName: "Personne",
-      licenseNumber: "L9998",
+      license: testLicense("L9998"),
     }),
   ).rejects.toThrow(/authentification requise/i);
 });
@@ -385,7 +385,7 @@ test("sans fournisseur configuré, le compte est créé et l'échec d'envoi est 
     clubId: s.homeClubId,
     firstName: "Camille",
     lastName: "Durand",
-    licenseNumber: "L0001",
+    license: testLicense("L0001"),
     email: "camille@club-a.fr",
   });
 
@@ -403,7 +403,7 @@ test("un compte rattaché à une adresse existante ne déclenche aucun envoi", a
     clubId: s.homeClubId,
     firstName: "Déjà",
     lastName: "Là",
-    licenseNumber: "L0002",
+    license: testLicense("L0002"),
     email: "deja@club-a.fr",
   });
 
@@ -426,7 +426,7 @@ test("le message part chez Brevo avec la bonne requête quand la configuration e
     clubId: s.homeClubId,
     firstName: "Camille",
     lastName: "Durand",
-    licenseNumber: "L0001",
+    license: testLicense("L0001"),
     email: "camille@club-a.fr",
   });
 
@@ -463,7 +463,7 @@ test("un refus de Brevo est remonté avec son motif, sans empêcher la création
       clubId: s.homeClubId,
       firstName: "Camille",
       lastName: "Durand",
-      licenseNumber: "L0001",
+      license: testLicense("L0001"),
       email: "camille@club-a.fr",
     });
 

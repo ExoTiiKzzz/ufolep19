@@ -4,6 +4,7 @@ import { useQuery } from "convex/react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
+import { LicenseBadge } from "@/components/license-badge";
 import { ClubLogo } from "@/components/club-logo";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -120,8 +121,8 @@ export default function ClubPage() {
                         {player.lastName.toUpperCase()} {player.firstName}
                       </Link>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {player.licenseNumber || "—"}
+                    <TableCell>
+                      <LicenseBadge license={player.license} />
                     </TableCell>
                   </TableRow>
                 ))}

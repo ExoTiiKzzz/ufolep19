@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/convex/_generated/api";
+import { errorMessage } from "@/lib/errors";
 
 export default function SeasonsPage() {
   const seasons = useQuery(api.seasons.list);
@@ -21,7 +22,7 @@ export default function SeasonsPage() {
     try {
       await action();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Action impossible.");
+      setError(errorMessage(caught));
     }
   }
 

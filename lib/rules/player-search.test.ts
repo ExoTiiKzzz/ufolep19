@@ -5,7 +5,7 @@ import { fold, matchesPlayer, tokenize } from "./player-search";
 const camille = {
   firstName: "Camille",
   lastName: "Pénicaut",
-  licenseNumber: "L0042",
+  licenseNumbers: ["L0042"],
   email: "camille.penicaut@club-a.fr",
   clubName: "VB Coiroux",
 };
@@ -72,4 +72,16 @@ describe("correspondances", () => {
     expect(matchesPlayer({ ...camille, email: null }, "penicaut")).toBe(true);
     expect(matchesPlayer({ ...camille, email: null }, "club-a.fr")).toBe(false);
   });
+});
+
+test("un numéro de licence périmé retrouve encore la fiche", () => {
+  // Le secrétaire de club cherche avec la carte qu'il a sous les yeux, qui est souvent
+  // celle de l'an dernier.
+  const renouvele = { ...camille, licenseNumbers: ["L0042", "L0101"] };
+  expect(matchesPlayer(renouvele, "L0042")).toBe(true);
+  expect(matchesPlayer(renouvele, "L0101")).toBe(true);
+});
+
+test("une fiche sans aucune licence reste cherchable par son nom", () => {
+  expect(matchesPlayer({ ...camille, licenseNumbers: [] }, "penicaut")).toBe(true);
 });

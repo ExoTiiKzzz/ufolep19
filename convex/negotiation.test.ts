@@ -449,6 +449,47 @@ test("le tableau de bord liste ce qui attend chaque responsable", async () => {
   ).toBe("waiting");
 });
 
+test("le compteur du bandeau suit exactement ce que le tableau de bord range dans « À traiter »", async () => {
+  at(BEFORE_WINDOW);
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+
+  const actionableFor = async (subject: string) =>
+    (await t.withIdentity({ subject }).query(api.matches.myTodo, {})).filter(
+      (row) => row.action !== "waiting",
+    ).length;
+  const countFor = async (subject: string) =>
+    await t.withIdentity({ subject }).query(api.matches.myTodoCount, {});
+
+  // Au départ : une proposition à faire côté receveur, rien côté visiteur.
+  expect(await countFor(s.homeManager)).toBe(1);
+  expect(await countFor(s.homeManager)).toBe(await actionableFor(s.homeManager));
+  expect(await countFor(s.awayManager)).toBe(0);
+  expect(await countFor(s.awayManager)).toBe(await actionableFor(s.awayManager));
+
+  await t.withIdentity({ subject: s.homeManager }).mutation(api.negotiation.proposeSlot, {
+    matchId: s.matchId,
+    at: SLOT_AT,
+    venue: VENUE,
+  });
+
+  // La main a changé de camp : le receveur attend, le visiteur a une réponse à donner.
+  expect(await countFor(s.homeManager)).toBe(0);
+  expect(await countFor(s.homeManager)).toBe(await actionableFor(s.homeManager));
+  expect(await countFor(s.awayManager)).toBe(1);
+  expect(await countFor(s.awayManager)).toBe(await actionableFor(s.awayManager));
+});
+
+test("le compteur est nul pour un compte sans équipe, et refusé sans compte", async () => {
+  at(BEFORE_WINDOW);
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+
+  // L'administrateur ne gère aucune équipe : rien ne l'attend à ce titre.
+  expect(await t.withIdentity({ subject: s.admin }).query(api.matches.myTodoCount, {})).toBe(0);
+  await expect(t.query(api.matches.myTodoCount, {})).rejects.toThrow(/authentification requise/i);
+});
+
 test("l'historique de négociation est réservé aux responsables du match", async () => {
   at(BEFORE_WINDOW);
   const t = convexTest(schema, modules);

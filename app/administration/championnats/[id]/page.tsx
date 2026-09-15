@@ -15,6 +15,7 @@ import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { dateInputValue, formatDateTime, formatWindow, parisDayBounds } from "@/lib/format";
 import { matchStateLabels, matchStateVariant } from "@/lib/labels";
+import { errorMessage } from "@/lib/errors";
 
 export default function AdminChampionshipPage() {
   const championshipId = useParams<{ id: string }>().id as Id<"championships">;
@@ -41,7 +42,7 @@ export default function AdminChampionshipPage() {
         setNotice(success);
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Action impossible.");
+      setError(errorMessage(caught));
     }
   }
 

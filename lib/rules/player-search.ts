@@ -13,7 +13,11 @@
 export type SearchablePlayer = {
   firstName: string;
   lastName: string;
-  licenseNumber: string;
+  /**
+   * Tous les numéros de licence du licencié, **y compris les périmés** : un secrétaire de
+   * club cherche avec le numéro qu'il a sous les yeux, qui est souvent celui de l'an dernier.
+   */
+  licenseNumbers: string[];
   email?: string | null;
   /** Nom du club, pour qu'un administrateur puisse filtrer sur un club. */
   clubName?: string;
@@ -54,7 +58,7 @@ export function matchesPlayer(player: SearchablePlayer, term: string): boolean {
     [
       player.firstName,
       player.lastName,
-      player.licenseNumber,
+      ...player.licenseNumbers,
       player.email ?? "",
       player.clubName ?? "",
     ].join(" "),

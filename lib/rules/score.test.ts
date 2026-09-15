@@ -1,6 +1,12 @@
 import { describe, expect, test } from "vitest";
 
-import { forfeitScore, validateMatchScore, type SetScore } from "./score";
+import {
+  decidedWinner,
+  forfeitScore,
+  setsWonSoFar,
+  validateMatchScore,
+  type SetScore,
+} from "./score";
 
 /** Raccourci de lecture : « 25-20 » plutôt qu'un objet. */
 function sets(...scores: string[]): SetScore[] {
@@ -120,4 +126,41 @@ test("le score conventionnel de forfait est un 3-0 valide", () => {
       winner: "home",
     });
   }
+});
+
+describe("décompte au fil de la saisie", () => {
+  test("compte les sets déjà posés, sans exiger un match complet", () => {
+    expect(setsWonSoFar(sets("25-20", "18-25"))).toEqual({ home: 1, away: 1 });
+  });
+
+  test("ne compte rien sur une liste vide", () => {
+    expect(setsWonSoFar([])).toEqual({ home: 0, away: 0 });
+  });
+
+  test("un set à égalité ne compte pour personne", () => {
+    // Impossible en match, mais traversé en cours de frappe : « 25 » puis « 25 ».
+    expect(setsWonSoFar(sets("25-25"))).toEqual({ home: 0, away: 0 });
+  });
+
+  test("compte un score que la validation refuserait", () => {
+    // Le décompte est un repère de saisie, pas un juge : c'est validateMatchScore qui
+    // refusera ce 10-3.
+    expect(setsWonSoFar(sets("10-3"))).toEqual({ home: 1, away: 0 });
+  });
+});
+
+describe("vainqueur désigné", () => {
+  test("personne tant que les 3 sets ne sont pas atteints", () => {
+    expect(decidedWinner({ home: 2, away: 2 })).toBe(null);
+    expect(decidedWinner({ home: 0, away: 0 })).toBe(null);
+  });
+
+  test("désigne le camp arrivé à 3 sets", () => {
+    expect(decidedWinner({ home: 3, away: 1 })).toBe("home");
+    expect(decidedWinner({ home: 2, away: 3 })).toBe("away");
+  });
+
+  test("ne tranche pas quand les deux camps sont à 3 : le score est impossible", () => {
+    expect(decidedWinner({ home: 3, away: 3 })).toBe(null);
+  });
 });

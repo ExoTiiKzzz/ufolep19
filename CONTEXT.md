@@ -17,6 +17,12 @@ Fiche d'un licencié rattaché à un club et affecté à une ou plusieurs équip
 sans compte utilisateur : c'est une donnée d'effectif, pas un utilisateur.
 _Avoid_: licencié, membre, adhérent
 
+**Licence** (`license`):
+Numéro délivré à un joueur, valable sur une période bornée. Un joueur en accumule une par
+saison, parfois sous un numéro différent : la liste est un historique, jamais réécrit. Hors de
+sa période de validité, une licence n'autorise plus à être aligné sur un match.
+_Avoid_: carte, adhésion, affiliation, numéro de licencié
+
 **Compte** (`user`):
 Identité de connexion, portant un rôle unique (`player`, `manager`, `admin`). Un compte de rôle
 `player` peut être rattaché à une fiche Joueur, mais une fiche Joueur n'a pas besoin de compte.

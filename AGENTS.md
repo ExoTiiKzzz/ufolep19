@@ -33,7 +33,7 @@ Principes :
 ## Modèle de domaine
 
 ```
-Saison ──< Championnat ──< Journée ──< Match >── Équipe >── Club ──< Joueur
+Saison ──< Championnat ──< Journée ──< Match >── Équipe >── Club ──< Joueur ──< Licence
                                        │                              │
                                        └──< Set                       │
                                        └──< Composition >─────────────┘
@@ -44,7 +44,10 @@ Saison ──< Championnat ──< Journée ──< Match >── Équipe >─�
   saisons.** Porte une salle par défaut et, facultativement, un **logo** (voir « Fichiers »).
 - **Joueur** — fiche d'un licencié rattaché à un club. **Traverse les saisons.** Existe sans compte
   utilisateur : c'est une donnée d'effectif, pas un utilisateur. Peut porter une **adresse e-mail**,
-  qui déclenche la création d'un compte de consultation (voir « Comptes de licenciés »).
+  qui déclenche la création d'un compte de consultation (voir « Comptes de licenciés »). La fiche
+  ne porte **pas** de numéro de licence : voir « Licences ».
+- **Licence** — un numéro et sa période de validité, rattachés à un joueur. Un joueur en accumule
+  plusieurs au fil des saisons ; hors de sa période, une licence n'autorise plus à jouer.
 - **Équipe** — appartient à un club et à **une seule saison**, engagée dans un championnat. Porte
   un effectif et un ou plusieurs **responsables**. Une nouvelle saison = de nouvelles équipes, avec
   reprise possible de l'effectif précédent.
@@ -179,6 +182,48 @@ Règles de validation d'une composition :
   **rejeté**.
 - Un même joueur aligné pour deux équipes différentes dans la même journée est **autorisé**, mais
   remonté dans une vue de contrôle de l'administrateur.
+
+## Licences
+
+Un joueur ne porte pas *un* numéro de licence : il en porte une **suite**, chacune valable sur
+une période bornée. Une licence ne se prolonge pas — on en **délivre une nouvelle**, au même
+numéro ou à un autre, et la précédente reste dans l'historique avec ses dates.
+
+- **Une licence valable jusqu'au 9 septembre couvre le 9 au soir, et plus rien le 10.**
+  `validUntil` est le dernier *instant* de validité, pas le début du dernier jour.
+- Les périodes d'un même joueur **ne se chevauchent pas** — sinon « la licence du 10 septembre »
+  n'aurait pas de réponse unique. Elles peuvent en revanche laisser un **trou** : un licencié qui
+  s'interrompt une saison puis revient, ça existe, et le modèle doit pouvoir le dire.
+- Un numéro ne peut pas être porté par **deux joueurs différents**. Le même joueur peut en
+  revanche le reprendre d'une saison sur l'autre : une reconduction au même numéro n'est pas un
+  doublon.
+
+**La validité se juge à la date du match, jamais à celle de la saisie.** Une feuille transcrite
+trois jours plus tard ne peut pas rejeter un joueur régulièrement licencié le jour où il a joué ;
+à l'inverse, une licence renouvelée après coup ne régularise pas un match déjà disputé. C'est
+`match.slot.at` qui fait foi dans `sheets.submit`.
+
+Une licence périmée **n'exclut pas de l'effectif** : l'effectif est une donnée de rattachement,
+qui survit à une licence à renouveler. Le refus intervient au moment d'aligner le joueur. L'écran
+de composition le signale et décoche le joueur, mais c'est Convex qui refuse.
+
+Une licence périmée est **affichée**, pas masquée : « 1234, expirée le 31 août » se corrige, un
+tiret laisse croire que le licencié n'en a jamais eu.
+
+La recherche de licenciés couvre **tous** les numéros, y compris périmés : un secrétaire de club
+cherche avec la carte qu'il a sous les yeux, souvent celle de l'an dernier.
+
+### Migration depuis le modèle à numéro unique
+
+Les fiches portaient autrefois un `licenseNumber` sans dates. La reprise est explicite :
+
+```bash
+npx convex run licenses:migrate '{"validFrom":"2025-09-01","validUntil":"2026-08-31"}'
+```
+
+Les dates sont **obligatoires** : l'ancien modèle n'en portait aucune, et les deviner déciderait
+à la place de l'utilisateur qui a le droit de jouer. La commande est rejouable — une fiche déjà
+migrée n'a plus de numéro hérité et est ignorée.
 
 ## Forfaits
 
@@ -337,9 +382,10 @@ Ce sont des couleurs **saturées** : le bleu porte du texte **blanc**, le jaune 
 | Token | Usage |
 | --- | --- |
 | `primary` — bleu roi | état acquis, action principale, bandeau de navigation, tête de classement |
-| `secondary` — jaune d'or | ce qui attend une action : créneau à valider, feuille en attente, fenêtre de journée qui se ferme |
+| `secondary` — jaune d'or | ce qui attend une action : créneau à valider, feuille en attente, fenêtre de journée qui se ferme, en-tête « À traiter » du tableau de bord |
 | `destructive` — rouge | problème : litige, fenêtre de journée dépassée |
 | `muted` — gris | information neutre : rôle d'un compte, saison archivée, match terminé |
+| `win` / `loss` — vert et rouge tendres | issue sportive d'un match : colonnes de la grille de saisie, lignes de la feuille de match |
 
 Quatre contraintes qui viennent de ce choix, chacune pour une raison mesurée :
 
@@ -355,8 +401,28 @@ Quatre contraintes qui viennent de ce choix, chacune pour une raison mesurée :
 - **Les contrôles posés sur le bandeau** expriment leurs couleurs relativement à
   `primary-foreground`, et non aux couleurs de page. Sans ça, un bouton `outline` devient
   illisible en thème sombre — fond de page sombre sur bandeau bleu.
+- **`win` et `loss` sont des teintes de fond, pas des aplats.** Elles colorent un panneau
+  derrière des champs de saisie ; `loss` ne réutilise pas `destructive`, qui reste réservé
+  au problème (litige, fenêtre dépassée) — une défaite n'en est pas un. Et la couleur ne
+  porte jamais seule : le compte de sets et le mot « vainqueur » ou « défaite » sont
+  écrits, faute de quoi la grille serait illisible pour un daltonien.
 
 Toute nouvelle couleur passe par un token, jamais par une classe Tailwind de couleur brute.
+
+**Compteur « à traiter »** : le nombre de matchs qui attendent le compte connecté est porté
+par le bandeau, à côté de « Tableau de bord », et l'en-tête de la carte « À traiter » passe au
+**jaune** tant qu'il reste quelque chose — c'est bien ce qui attend une action.
+[ADR-0002](./docs/adr/0002-validation-tacite-sans-notification.md) n'envoyant aucune
+notification, ce compteur est le seul signal qu'un responsable reçoive.
+
+Deux points qui découlent des règles de palette :
+
+- la pastille du bandeau est **posée sur le bleu**, où seul `primary-foreground` est lisible :
+  elle est donc blanche à chiffre bleu, et non jaune comme l'en-tête de la carte ;
+- l'en-tête jaune porte sa bordure `secondary-border`, comme tout aplat jaune.
+
+Le compte vient de `matches.myTodoCount`, qui partage son classement avec `matches.myTodo` —
+les deux nombres ne peuvent pas diverger, et un test le vérifie.
 
 **Page d'accueil** : elle montre un championnat par défaut — le premier de la saison courante — avec
 son classement, puis la journée en cours, ou la prochaine si aucune fenêtre n'est ouverte, ou la

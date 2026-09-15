@@ -6,6 +6,13 @@ import { useParams } from "next/navigation";
 import { useState } from "react";
 
 import { ClubLogo } from "@/components/club-logo";
+import {
+  collectSets,
+  emptySetInputs,
+  SetScoresInput,
+  setInputsFrom,
+  type ScoreColumnTeam,
+} from "@/components/set-scores-input";
 import { SetsTable } from "@/components/sets-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,8 +22,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
+import { errorMessage } from "@/lib/errors";
 import {
   formatCountdown,
+  formatDate,
   formatDateTime,
   formatSets,
   formatWindow,
@@ -30,8 +39,6 @@ import {
   proposalStatusLabels,
 } from "@/lib/labels";
 
-const EMPTY_SETS = [0, 1, 2, 3, 4].map(() => ({ home: "", away: "" }));
-
 export default function MatchPage() {
   const matchId = useParams<{ id: string }>().id as Id<"matches">;
   const match = useQuery(api.matches.get, { matchId });
@@ -41,13 +48,15 @@ export default function MatchPage() {
   const sheet = useQuery(api.sheets.get, account ? { matchId } : "skip");
   // Feuille d'un match terminé : score par set et compositions, lisibles sans compte.
   const publicSheet = useQuery(api.sheets.publicResult, { matchId });
+  // La validité des licences est jugée à la date du match, pas à celle de la saisie.
+  const rosterAt = match?.slot?.at;
   const homeRoster = useQuery(
     api.roster.listByTeam,
-    account && match ? { teamId: match.homeTeamId } : "skip",
+    account && match ? { teamId: match.homeTeamId, at: rosterAt } : "skip",
   );
   const awayRoster = useQuery(
     api.roster.listByTeam,
-    account && match ? { teamId: match.awayTeamId } : "skip",
+    account && match ? { teamId: match.awayTeamId, at: rosterAt } : "skip",
   );
 
   const proposeSlot = useMutation(api.negotiation.proposeSlot);
@@ -64,7 +73,11 @@ export default function MatchPage() {
 
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [sets, setSets] = useState(EMPTY_SETS);
+  // Deux grilles distinctes : celle du receveur part vide, celle de l'arbitrage part de la
+  // feuille contestée. Les mêlerait-on qu'un préremplissage écraserait une saisie en cours.
+  const [sheetSets, setSheetSets] = useState(emptySetInputs);
+  const [arbitrationSets, setArbitrationSets] = useState(emptySetInputs);
+  const [arbitrationSeed, setArbitrationSeed] = useState<string | null>(null);
   const [homeLineup, setHomeLineup] = useState<string[]>([]);
   const [awayLineup, setAwayLineup] = useState<string[]>([]);
 
@@ -77,7 +90,7 @@ export default function MatchPage() {
         setNotice(success);
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Action impossible.");
+      setError(errorMessage(caught, "Action impossible."));
     }
   }
 
@@ -94,9 +107,34 @@ export default function MatchPage() {
     (request) => request.status === "pending",
   );
   const playable = match.slot !== undefined && now >= match.slot.at;
-  const collectedSets = sets
-    .filter((set) => set.home !== "" || set.away !== "")
-    .map((set) => ({ home: Number(set.home), away: Number(set.away) }));
+
+  const homeColumn: ScoreColumnTeam = {
+    teamId: match.homeTeamId,
+    teamName: match.homeTeamName,
+    clubName: match.homeClubName,
+    clubLogoUrl: match.homeClubLogoUrl,
+  };
+  const awayColumn: ScoreColumnTeam = {
+    teamId: match.awayTeamId,
+    teamName: match.awayTeamName,
+    clubName: match.awayClubName,
+    clubLogoUrl: match.awayClubLogoUrl,
+  };
+
+  // Arbitrage : l'administrateur corrige un score, il ne le ressaisit pas. On amorce donc
+  // la grille avec la feuille contestée. Motif React d'ajustement d'état pendant le rendu :
+  // le repère évite de réécraser les corrections à chaque re-rendu, et le statut le fait
+  // repartir si la feuille retombe en litige plus tard.
+  const disputedSheet = match.state === "disputed" && sheet ? sheet : null;
+  if (disputedSheet !== null) {
+    // Le repère décrit la feuille elle-même : il ne bouge pas quand l'administrateur tape,
+    // et repart si la feuille contestée change réellement.
+    const key = `${disputedSheet.status}:${JSON.stringify(disputedSheet.sets)}`;
+    if (key !== arbitrationSeed) {
+      setArbitrationSeed(key);
+      setArbitrationSets(setInputsFrom(disputedSheet.sets));
+    }
+  }
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-10">
@@ -372,50 +410,13 @@ export default function MatchPage() {
               <CardContent className="flex flex-col gap-6">
                 <div>
                   <p className="text-sm font-medium">Score par set</p>
-                  <div className="mt-2 flex flex-col gap-2">
-                    {sets.map((set, index) => (
-                      <div key={index} className="flex items-center gap-2">
-                        <span className="text-muted-foreground w-16 text-sm">
-                          Set {index + 1}
-                        </span>
-                        <Input
-                          type="number"
-                          min={0}
-                          className="w-20"
-                          value={set.home}
-                          aria-label={`Set ${index + 1} ${match.homeTeamName}`}
-                          onChange={(event) =>
-                            setSets((previous) =>
-                              previous.map((row, position) =>
-                                position === index
-                                  ? { ...row, home: event.target.value }
-                                  : row,
-                              ),
-                            )
-                          }
-                        />
-                        <span className="text-muted-foreground">—</span>
-                        <Input
-                          type="number"
-                          min={0}
-                          className="w-20"
-                          value={set.away}
-                          aria-label={`Set ${index + 1} ${match.awayTeamName}`}
-                          onChange={(event) =>
-                            setSets((previous) =>
-                              previous.map((row, position) =>
-                                position === index
-                                  ? { ...row, away: event.target.value }
-                                  : row,
-                              ),
-                            )
-                          }
-                        />
-                        <span className="text-muted-foreground text-xs">
-                          {index === 4 ? "tie-break, 15 points" : "25 points"}
-                        </span>
-                      </div>
-                    ))}
+                  <div className="mt-2">
+                    <SetScoresInput
+                      home={homeColumn}
+                      away={awayColumn}
+                      sets={sheetSets}
+                      onChange={setSheetSets}
+                    />
                   </div>
                 </div>
 
@@ -438,11 +439,11 @@ export default function MatchPage() {
                     guard(async () => {
                       const { tacitDeadline } = await submitSheet({
                         matchId,
-                        sets: collectedSets,
+                        sets: collectSets(sheetSets),
                         homeLineup: homeLineup as Id<"players">[],
                         awayLineup: awayLineup as Id<"players">[],
                       });
-                      setSets(EMPTY_SETS);
+                      setSheetSets(emptySetInputs());
                       setHomeLineup([]);
                       setAwayLineup([]);
                       setNotice(
@@ -528,52 +529,38 @@ export default function MatchPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-4">
-                <SetsTable
-                  homeTeamName={match.homeTeamName}
-                  awayTeamName={match.awayTeamName}
-                  sets={sheet.sets}
-                />
-                <div className="flex flex-col gap-2">
-                  {sets.map((set, index) => (
-                    <div key={index} className="flex items-center gap-2">
-                      <span className="text-muted-foreground w-16 text-sm">Set {index + 1}</span>
-                      <Input
-                        type="number"
-                        min={0}
-                        className="w-20"
-                        value={set.home}
-                        aria-label={`Arbitrage set ${index + 1} receveur`}
-                        onChange={(event) =>
-                          setSets((previous) =>
-                            previous.map((row, position) =>
-                              position === index ? { ...row, home: event.target.value } : row,
-                            ),
-                          )
-                        }
-                      />
-                      <span className="text-muted-foreground">—</span>
-                      <Input
-                        type="number"
-                        min={0}
-                        className="w-20"
-                        value={set.away}
-                        aria-label={`Arbitrage set ${index + 1} visiteur`}
-                        onChange={(event) =>
-                          setSets((previous) =>
-                            previous.map((row, position) =>
-                              position === index ? { ...row, away: event.target.value } : row,
-                            ),
-                          )
-                        }
-                      />
-                    </div>
-                  ))}
+                <div>
+                  <p className="text-sm font-medium">Feuille contestée</p>
+                  <div className="mt-2">
+                    <SetsTable
+                      homeTeamName={match.homeTeamName}
+                      awayTeamName={match.awayTeamName}
+                      sets={sheet.sets}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <p className="text-sm font-medium">
+                    Score à arrêter{" "}
+                    <span className="text-muted-foreground font-normal">
+                      (prérempli avec la feuille contestée : corrigez ce qui doit l&apos;être)
+                    </span>
+                  </p>
+                  <div className="mt-2">
+                    <SetScoresInput
+                      home={homeColumn}
+                      away={awayColumn}
+                      sets={arbitrationSets}
+                      onChange={setArbitrationSets}
+                      idPrefix="Arbitrage — "
+                    />
+                  </div>
                 </div>
                 <Button
                   className="self-start"
                   onClick={() =>
                     guard(
-                      () => settleDispute({ matchId, sets: collectedSets }),
+                      () => settleDispute({ matchId, sets: collectSets(arbitrationSets) }),
                       "Litige tranché : le score est arrêté.",
                     )
                   }
@@ -653,6 +640,13 @@ export default function MatchPage() {
   );
 }
 
+/**
+ * Choix des joueurs alignés.
+ *
+ * Un joueur dont la licence ne couvre pas la date du match est **décoché et désactivé**,
+ * avec le motif écrit à côté. Convex refuserait la feuille de toute façon ; l'annoncer ici
+ * évite de remplir tout le formulaire pour se le voir rejeter à l'envoi.
+ */
 function LineupPicker({
   title,
   players,
@@ -660,10 +654,16 @@ function LineupPicker({
   onToggle,
 }: {
   title: string;
-  players: { _id: string; firstName: string; lastName: string }[];
+  players: {
+    _id: string;
+    firstName: string;
+    lastName: string;
+    license: { number: string | null; validUntil: number | null; isValid: boolean };
+  }[];
   selected: string[];
   onToggle: (next: string[]) => void;
 }) {
+  const ineligible = players.filter((player) => !player.license.isValid);
   return (
     <div>
       <p className="text-sm font-medium">
@@ -677,9 +677,17 @@ function LineupPicker({
       ) : (
         <div className="mt-2 grid gap-1 sm:grid-cols-2">
           {players.map((player) => (
-            <label key={player._id} className="flex items-center gap-2 text-sm">
+            <label
+              key={player._id}
+              className={
+                player.license.isValid
+                  ? "flex items-center gap-2 text-sm"
+                  : "text-muted-foreground flex items-center gap-2 text-sm"
+              }
+            >
               <input
                 type="checkbox"
+                disabled={!player.license.isValid}
                 checked={selected.includes(player._id)}
                 onChange={(event) =>
                   onToggle(
@@ -689,10 +697,26 @@ function LineupPicker({
                   )
                 }
               />
-              {player.lastName.toUpperCase()} {player.firstName}
+              <span>
+                {player.lastName.toUpperCase()} {player.firstName}
+              </span>
+              {player.license.isValid ? null : (
+                <Badge variant="destructive">
+                  {player.license.validUntil === null
+                    ? "sans licence"
+                    : `licence expirée le ${formatDate(player.license.validUntil)}`}
+                </Badge>
+              )}
             </label>
           ))}
         </div>
+      )}
+      {ineligible.length === 0 ? null : (
+        <p className="text-muted-foreground mt-2 text-xs">
+          {ineligible.length} joueur{ineligible.length > 1 ? "s" : ""} non alignable
+          {ineligible.length > 1 ? "s" : ""} : la licence doit couvrir la date du match.
+          Délivrez-en une depuis la fiche du joueur.
+        </p>
       )}
     </div>
   );

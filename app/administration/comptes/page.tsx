@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/table";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
+import { errorMessage } from "@/lib/errors";
 import { roleLabels, type Role } from "@/lib/roles";
 
 export default function AccountsPage() {
@@ -45,7 +46,7 @@ export default function AccountsPage() {
         setNotice(success);
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Action impossible.");
+      setError(errorMessage(caught, "Action impossible."));
     }
   }
 

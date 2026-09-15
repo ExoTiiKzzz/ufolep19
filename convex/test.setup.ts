@@ -37,6 +37,19 @@ export const SLOT_AT = Date.UTC(2026, 0, 10, 19, 0);
 export const BEFORE_WINDOW = Date.UTC(2025, 11, 15, 12, 0);
 
 /**
+ * Période de licence des joueurs semés : large de part et d'autre du créneau, pour que les
+ * tests qui ne portent pas sur la licence ne butent jamais dessus. Les tests de licence,
+ * eux, posent leurs propres dates.
+ */
+export const LICENSE_FROM = Date.UTC(2025, 6, 1);
+export const LICENSE_UNTIL = Date.UTC(2026, 7, 31, 21, 59, 59, 999);
+
+/** Licence sur cette période : ce que passent les tests qui ne portent pas sur la validité. */
+export function testLicense(number: string) {
+  return { number, validFrom: LICENSE_FROM, validUntil: LICENSE_UNTIL };
+}
+
+/**
  * Crée un compte directement en base, sans mot de passe : suffisant pour incarner un
  * rôle dans les tests d'autorisation. Le vrai chemin de création (avec identifiants)
  * est couvert par les tests de `admin:createAdmin`.
@@ -150,7 +163,14 @@ export async function seedRoster(
         clubId,
         firstName: `Joueuse${i}`,
         lastName: `Nom${i}`,
-        licenseNumber: `L${String(i).padStart(4, "0")}`,
+      });
+      await ctx.db.insert("licenses", {
+        playerId,
+        // Le numéro inclut l'équipe : deux effectifs semés côte à côte ne peuvent pas
+        // porter les mêmes, ce que les mutations refuseraient en vrai.
+        number: `L-${String(teamId).slice(-4)}-${String(i).padStart(3, "0")}`,
+        validFrom: LICENSE_FROM,
+        validUntil: LICENSE_UNTIL,
       });
       await ctx.db.insert("rosterEntries", { teamId, playerId });
       ids.push(playerId);

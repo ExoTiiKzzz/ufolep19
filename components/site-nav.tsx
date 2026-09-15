@@ -20,6 +20,11 @@ const onPrimary =
 
 export function SiteNav() {
   const account = useQuery(api.users.me);
+  // Compteur de « à traiter ». Réservé aux comptes connectés : la query exige une identité.
+  const todoCount = useQuery(
+    api.matches.myTodoCount,
+    account === undefined || account === null ? "skip" : {},
+  );
   const { signOut } = useAuthActions();
   const router = useRouter();
 
@@ -34,9 +39,19 @@ export function SiteNav() {
           <>
             <Link
               href="/tableau-de-bord"
-              className="text-primary-foreground/80 text-sm hover:underline"
+              className="text-primary-foreground/80 flex items-center gap-1.5 text-sm hover:underline"
             >
               Tableau de bord
+              {todoCount === undefined || todoCount === 0 ? null : (
+                <span
+                  // Le bandeau est déjà bleu : le compteur s'exprime relativement à
+                  // `primary-foreground`, sinon du bleu sur bleu ne se verrait pas.
+                  className="bg-primary-foreground text-primary rounded-full px-1.5 text-xs font-semibold"
+                  aria-label={`${todoCount} élément${todoCount > 1 ? "s" : ""} à traiter`}
+                >
+                  {todoCount}
+                </span>
+              )}
             </Link>
             {account.role === "admin" ? (
               <Link

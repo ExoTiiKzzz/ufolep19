@@ -148,6 +148,42 @@ export function validateMatchScore(sets: SetScore[]): ScoreValidation {
   };
 }
 
+/**
+ * Sets gagnés de part et d'autre, sans rien valider.
+ *
+ * Distinct de `validateMatchScore` : celui-ci juge un match complet et refuse tout ce qui
+ * n'est pas un score légal. Ici on compte ce qui est déjà posé, sur une feuille encore en
+ * cours de frappe, pour donner un repère à la saisie. Un set nul ne compte pour personne.
+ */
+export function setsWonSoFar(sets: SetScore[]): { home: number; away: number } {
+  let home = 0;
+  let away = 0;
+  for (const set of sets) {
+    if (set.home > set.away) {
+      home++;
+    } else if (set.away > set.home) {
+      away++;
+    }
+  }
+  return { home, away };
+}
+
+/**
+ * Le camp qui a atteint les 3 sets, ou `null` tant que personne n'y est.
+ *
+ * Rend `null` aussi quand les deux y sont : c'est un score impossible, qu'une saisie en
+ * cours peut traverser. Mieux vaut ne rien annoncer que désigner un vainqueur au hasard —
+ * `validateMatchScore` refusera le score de toute façon.
+ */
+export function decidedWinner(won: { home: number; away: number }): "home" | "away" | null {
+  const homeWins = won.home >= SETS_TO_WIN;
+  const awayWins = won.away >= SETS_TO_WIN;
+  if (homeWins === awayWins) {
+    return null;
+  }
+  return homeWins ? "home" : "away";
+}
+
 /** Score conventionnel d'un forfait : 3 sets à 0, chaque set à 25-0. */
 export function forfeitScore(): SetScore[] {
   return [

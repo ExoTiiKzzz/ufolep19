@@ -5,11 +5,14 @@ import { api } from "./_generated/api";
 import schema from "./schema";
 import {
   forceConfirmed,
+  LICENSE_FROM,
+  LICENSE_UNTIL,
   modules,
   seedBothRosters,
   seedRoster,
   setupChampionship,
   SLOT_AT,
+  testLicense,
   VALID_SETS,
 } from "./test.setup";
 
@@ -164,7 +167,7 @@ test("l'e-mail d'un licencié ne sort jamais par une query publique", async () =
     clubId: s.homeClubId,
     firstName: "Camille",
     lastName: "Durand",
-    licenseNumber: "L0001",
+    license: testLicense("L0001"),
     email: "camille.durand@club-a.fr",
   });
 
@@ -196,14 +199,14 @@ test("la recherche de licenciés trouve par nom, licence et adresse", async () =
     clubId: s.homeClubId,
     firstName: "Camille",
     lastName: "Pénicaut",
-    licenseNumber: "L0042",
+    license: testLicense("L0042"),
     email: "camille.penicaut@club-a.fr",
   });
   await asManager.action(api.players.create, {
     clubId: s.homeClubId,
     firstName: "Noé",
     lastName: "Lascaux",
-    licenseNumber: "L0043",
+    license: testLicense("L0043"),
   });
   const asAdmin = t.withIdentity({ subject: s.admin });
 
@@ -215,7 +218,7 @@ test("la recherche de licenciés trouve par nom, licence et adresse", async () =
   expect(byName.players.map((p) => p.lastName)).toEqual(["Pénicaut"]);
   expect(byName.players[0]).toMatchObject({
     clubName: "Club A",
-    licenseNumber: "L0042",
+    license: testLicense("L0042"),
     hasAccount: true,
   });
 
@@ -256,11 +259,16 @@ test("au-delà de la limite, la recherche le signale", async () => {
   const s = await setupChampionship(t);
   await t.run(async (ctx) => {
     for (let i = 0; i < 105; i++) {
-      await ctx.db.insert("players", {
+      const seededId = await ctx.db.insert("players", {
         clubId: s.homeClubId,
         firstName: `Prénom${i}`,
         lastName: `Nom${String(i).padStart(3, "0")}`,
-        licenseNumber: `L${String(i).padStart(4, "0")}`,
+      });
+      await ctx.db.insert("licenses", {
+        playerId: seededId,
+        number: `L${String(i).padStart(4, "0")}`,
+        validFrom: LICENSE_FROM,
+        validUntil: LICENSE_UNTIL,
       });
     }
   });

@@ -3,7 +3,7 @@ import { expect, test } from "vitest";
 
 import { api } from "./_generated/api";
 import schema from "./schema";
-import { modules, seedAccount, seedRoster, setupChampionship } from "./test.setup";
+import { modules, seedAccount, seedRoster, setupChampionship, testLicense } from "./test.setup";
 
 test("un responsable constitue l'effectif de son équipe", async () => {
   const t = convexTest(schema, modules);
@@ -14,7 +14,7 @@ test("un responsable constitue l'effectif de son équipe", async () => {
     clubId: s.homeClubId,
     firstName: "Camille",
     lastName: "Durand",
-    licenseNumber: "L0001",
+    license: testLicense("L0001"),
   }).then((result) => result.playerId);
   await asHome.mutation(api.roster.add, { teamId: s.homeTeamId, playerId });
 
@@ -32,7 +32,7 @@ test("une fiche joueur existe sans compte utilisateur", async () => {
       clubId: s.homeClubId,
       firstName: "Camille",
       lastName: "Durand",
-      licenseNumber: "L0001",
+      license: testLicense("L0001"),
     }).then((result) => result.playerId);
 
   const player = await t.run(async (ctx) => ctx.db.get(playerId));
@@ -51,7 +51,7 @@ test("ajouter deux fois le même joueur ne crée pas de doublon", async () => {
     clubId: s.homeClubId,
     firstName: "Camille",
     lastName: "Durand",
-    licenseNumber: "L0001",
+    license: testLicense("L0001"),
   }).then((result) => result.playerId);
 
   await asHome.mutation(api.roster.add, { teamId: s.homeTeamId, playerId });
@@ -150,7 +150,7 @@ test("un numéro de licence déjà enregistré est refusé", async () => {
     clubId: s.homeClubId,
     firstName: "Camille",
     lastName: "Durand",
-    licenseNumber: "L0001",
+    license: testLicense("L0001"),
   });
 
   await expect(
@@ -158,7 +158,7 @@ test("un numéro de licence déjà enregistré est refusé", async () => {
       clubId: s.homeClubId,
       firstName: "Autre",
       lastName: "Personne",
-      licenseNumber: "L0001",
+      license: testLicense("L0001"),
     }),
   ).rejects.toThrow(/déjà enregistré/i);
 });
@@ -182,7 +182,7 @@ test("un joueur peut appartenir à deux équipes de son club", async () => {
     clubId: s.homeClubId,
     firstName: "Camille",
     lastName: "Durand",
-    licenseNumber: "L0001",
+    license: testLicense("L0001"),
   }).then((result) => result.playerId);
 
   await asHome.mutation(api.roster.add, { teamId: s.homeTeamId, playerId });

@@ -239,21 +239,134 @@ export const get = query({
   },
 });
 
+/** Les actions possibles sur un match, du point de vue d'un responsable. */
+const todoAction = v.union(
+  v.literal("proposeSlot"),
+  v.literal("respondSlot"),
+  v.literal("respondPostponement"),
+  v.literal("submitSheet"),
+  v.literal("respondSheet"),
+  v.literal("waiting"),
+  v.literal("disputed"),
+);
+
+export type TodoAction =
+  | "proposeSlot"
+  | "respondSlot"
+  | "respondPostponement"
+  | "submitSheet"
+  | "respondSheet"
+  | "waiting"
+  | "disputed";
+
+/** Ordre d'urgence : ce qui bloque l'adversaire passe devant ce qui ne bloque personne. */
+const TODO_PRIORITY: Record<TodoAction, number> = {
+  respondPostponement: 0,
+  respondSheet: 1,
+  respondSlot: 2,
+  submitSheet: 3,
+  proposeSlot: 4,
+  disputed: 5,
+  waiting: 6,
+};
+
+/**
+ * Tous les matchs des équipes gérées, dédoublonnés — une équipe peut recevoir sur l'un et
+ * se déplacer sur l'autre, et deux équipes gérées peuvent s'affronter.
+ */
+async function matchesOfTeams(ctx: QueryCtx, teamIds: Id<"teams">[]) {
+  const seen = new Set<string>();
+  const matches: Doc<"matches">[] = [];
+  for (const teamId of teamIds) {
+    for (const index of ["by_home_team", "by_away_team"] as const) {
+      const rows = await ctx.db
+        .query("matches")
+        .withIndex(index, (q) =>
+          index === "by_home_team" ? q.eq("homeTeamId", teamId) : q.eq("awayTeamId", teamId),
+        )
+        .collect();
+      for (const match of rows) {
+        if (!seen.has(match._id)) {
+          seen.add(match._id);
+          matches.push(match);
+        }
+      }
+    }
+  }
+  return matches;
+}
+
+/**
+ * Ce que ce match attend du compte donné, et l'échéance tacite qui court le cas échéant.
+ *
+ * Séparé de `myTodo` pour que le compteur du bandeau puisse classer les matchs **sans**
+ * payer le `summarize` de chacun : un badge de navigation, présent sur toutes les pages,
+ * n'a pas à résoudre deux URL de logo par ligne.
+ */
+async function classifyTodo(
+  ctx: QueryCtx,
+  match: Doc<"matches">,
+  userId: Id<"users">,
+  managed: Set<string>,
+  now: number,
+): Promise<{ action: TodoAction; deadline: number | null } | null> {
+  if (match.state === "completed") {
+    return null;
+  }
+  const iAmHome = managed.has(String(match.homeTeamId));
+  const iAmAway = managed.has(String(match.awayTeamId));
+  if (!iAmHome && !iAmAway) {
+    return null;
+  }
+
+  const proposals = await ctx.db
+    .query("slotProposals")
+    .withIndex("by_match", (q) => q.eq("matchId", match._id))
+    .collect();
+  const pendingProposal = proposals.find((proposal) => proposal.status === "pending");
+  const requests = await ctx.db
+    .query("postponementRequests")
+    .withIndex("by_match", (q) => q.eq("matchId", match._id))
+    .collect();
+  const pendingRequest = requests.find((request) => request.status === "pending");
+  const sheet = await ctx.db
+    .query("matchSheets")
+    .withIndex("by_match", (q) => q.eq("matchId", match._id))
+    .unique();
+
+  let action: TodoAction = "waiting";
+  let deadline: number | null = null;
+
+  if (pendingRequest !== undefined && pendingRequest.requestedBy !== userId) {
+    action = "respondPostponement";
+  } else if (match.state === "planned" && iAmHome) {
+    action = "proposeSlot";
+  } else if (match.state === "awaitingSlot") {
+    deadline = pendingProposal?.deadline ?? null;
+    action =
+      pendingProposal !== undefined && pendingProposal.proposedBy !== userId
+        ? "respondSlot"
+        : "waiting";
+  } else if (match.state === "confirmed") {
+    action =
+      iAmHome && match.slot !== undefined && now >= match.slot.at ? "submitSheet" : "waiting";
+  } else if (match.state === "awaitingSheet") {
+    deadline = sheet?.deadline ?? null;
+    action = sheet !== null && sheet.submittedBy !== userId ? "respondSheet" : "waiting";
+  } else if (match.state === "disputed") {
+    action = "disputed";
+  }
+
+  return { action, deadline };
+}
+
 /** Ce qui attend l'action du compte connecté, sur les équipes qu'il gère. */
 export const myTodo = query({
   args: {},
   returns: v.array(
     v.object({
       match: matchSummary,
-      action: v.union(
-        v.literal("proposeSlot"),
-        v.literal("respondSlot"),
-        v.literal("respondPostponement"),
-        v.literal("submitSheet"),
-        v.literal("respondSheet"),
-        v.literal("waiting"),
-        v.literal("disputed"),
-      ),
+      action: todoAction,
       deadline: v.union(v.number(), v.null()),
     }),
   ),
@@ -264,102 +377,60 @@ export const myTodo = query({
       return [];
     }
 
-    const seen = new Set<string>();
-    const matches: Doc<"matches">[] = [];
-    for (const teamId of teamIds) {
-      for (const index of ["by_home_team", "by_away_team"] as const) {
-        const rows = await ctx.db
-          .query("matches")
-          .withIndex(index, (q) =>
-            index === "by_home_team" ? q.eq("homeTeamId", teamId) : q.eq("awayTeamId", teamId),
-          )
-          .collect();
-        for (const match of rows) {
-          if (!seen.has(match._id)) {
-            seen.add(match._id);
-            matches.push(match);
-          }
-        }
-      }
-    }
-
+    const matches = await matchesOfTeams(ctx, teamIds);
     const now = Date.now();
     const managed = new Set(teamIds.map(String));
     const cache = newTeamCache();
     const todo = [];
 
     for (const match of matches) {
-      if (match.state === "completed") {
+      const classified = await classifyTodo(ctx, match, user._id, managed, now);
+      if (classified === null) {
         continue;
       }
-      const iAmHome = managed.has(String(match.homeTeamId));
-      const iAmAway = managed.has(String(match.awayTeamId));
-
-      const proposals = await ctx.db
-        .query("slotProposals")
-        .withIndex("by_match", (q) => q.eq("matchId", match._id))
-        .collect();
-      const pendingProposal = proposals.find((proposal) => proposal.status === "pending");
-      const requests = await ctx.db
-        .query("postponementRequests")
-        .withIndex("by_match", (q) => q.eq("matchId", match._id))
-        .collect();
-      const pendingRequest = requests.find((request) => request.status === "pending");
-      const sheet = await ctx.db
-        .query("matchSheets")
-        .withIndex("by_match", (q) => q.eq("matchId", match._id))
-        .unique();
-
-      let action:
-        | "proposeSlot"
-        | "respondSlot"
-        | "respondPostponement"
-        | "submitSheet"
-        | "respondSheet"
-        | "waiting"
-        | "disputed" = "waiting";
-      let deadline: number | null = null;
-
-      if (pendingRequest !== undefined && pendingRequest.requestedBy !== user._id) {
-        action = "respondPostponement";
-      } else if (match.state === "planned" && iAmHome) {
-        action = "proposeSlot";
-      } else if (match.state === "awaitingSlot") {
-        deadline = pendingProposal?.deadline ?? null;
-        action =
-          pendingProposal !== undefined && pendingProposal.proposedBy !== user._id
-            ? "respondSlot"
-            : "waiting";
-      } else if (match.state === "confirmed") {
-        action = iAmHome && match.slot !== undefined && now >= match.slot.at
-          ? "submitSheet"
-          : "waiting";
-      } else if (match.state === "awaitingSheet") {
-        deadline = sheet?.deadline ?? null;
-        action = sheet !== null && sheet.submittedBy !== user._id ? "respondSheet" : "waiting";
-      } else if (match.state === "disputed") {
-        action = "disputed";
-      }
-
-      if (!iAmHome && !iAmAway) {
-        continue;
-      }
-      todo.push({ match: await summarize(ctx, match, cache), action, deadline });
+      todo.push({
+        match: await summarize(ctx, match, cache),
+        action: classified.action,
+        deadline: classified.deadline,
+      });
     }
 
-    const priority = {
-      respondPostponement: 0,
-      respondSheet: 1,
-      respondSlot: 2,
-      submitSheet: 3,
-      proposeSlot: 4,
-      disputed: 5,
-      waiting: 6,
-    } as const;
     return todo.sort(
       (a, b) =>
-        priority[a.action] - priority[b.action] ||
+        TODO_PRIORITY[a.action] - TODO_PRIORITY[b.action] ||
         a.match.matchdayNumber - b.match.matchdayNumber,
     );
+  },
+});
+
+/**
+ * Combien de matchs attendent une action du compte connecté.
+ *
+ * Même classement que `myTodo`, sans l'habillage : c'est la requête du compteur porté par
+ * le bandeau, présent sur toutes les pages. Compte ce que le tableau de bord range dans
+ * « À traiter », donc tout sauf `waiting` — les deux nombres ne peuvent pas diverger.
+ */
+export const myTodoCount = query({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => {
+    const user = await requireUser(ctx);
+    const teamIds = await managedTeamIds(ctx, user._id);
+    if (teamIds.length === 0) {
+      return 0;
+    }
+
+    const matches = await matchesOfTeams(ctx, teamIds);
+    const now = Date.now();
+    const managed = new Set(teamIds.map(String));
+    let count = 0;
+
+    for (const match of matches) {
+      const classified = await classifyTodo(ctx, match, user._id, managed, now);
+      if (classified !== null && classified.action !== "waiting") {
+        count++;
+      }
+    }
+    return count;
   },
 });

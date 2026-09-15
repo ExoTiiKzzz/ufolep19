@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "dev:convex": "convex dev",
+    "seed:dev": "convex run seed:dev",
     "build": "next build",
     "start": "next start",
     "test": "vitest run",

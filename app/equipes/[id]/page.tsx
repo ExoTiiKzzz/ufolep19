@@ -5,6 +5,10 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 
+import { LicenseBadge } from "@/components/license-badge";
+import { LicenseFields, readLicenseFields } from "@/components/license-fields";
+import { errorMessage } from "@/lib/errors";
+import { LICENSE_FIELDS_ERROR } from "@/lib/license-messages";
 import { ClubLogo } from "@/components/club-logo";
 import { MatchRow } from "@/components/match-row";
 import { Badge } from "@/components/ui/badge";
@@ -67,7 +71,7 @@ export default function TeamPage() {
     try {
       await action();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Action impossible.");
+      setError(errorMessage(caught, "Action impossible."));
     }
   }
 
@@ -172,8 +176,8 @@ export default function TeamPage() {
                           {player.lastName.toUpperCase()} {player.firstName}
                         </Link>
                       </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {player.licenseNumber || "—"}
+                      <TableCell>
+                        <LicenseBadge license={player.license} />
                       </TableCell>
                       {canManage ? (
                         <TableCell className="text-right">
@@ -293,12 +297,17 @@ export default function TeamPage() {
                   event.preventDefault();
                   const form = new FormData(event.currentTarget);
                   const element = event.currentTarget;
+                  const license = readLicenseFields(form);
+                  if (license === "invalid") {
+                    setError(LICENSE_FIELDS_ERROR);
+                    return;
+                  }
                   await guard(async () => {
                     const { playerId, account } = await createPlayer({
                       clubId: team.clubId,
                       firstName: String(form.get("firstName")),
                       lastName: String(form.get("lastName")),
-                      licenseNumber: String(form.get("licenseNumber")),
+                      license,
                       email: String(form.get("email")),
                     });
                     await addToRoster({ teamId, playerId });
@@ -317,10 +326,7 @@ export default function TeamPage() {
                   <Label htmlFor="firstName">Prénom</Label>
                   <Input id="firstName" name="firstName" className="mt-2" required />
                 </div>
-                <div>
-                  <Label htmlFor="licenseNumber">Licence</Label>
-                  <Input id="licenseNumber" name="licenseNumber" className="mt-2" />
-                </div>
+                <LicenseFields />
                 <div className="min-w-56 flex-1">
                   <Label htmlFor="email">E-mail (facultatif)</Label>
                   <Input
