@@ -380,14 +380,30 @@ export const search = query({
         clubId: v.id("clubs"),
         clubName: v.string(),
         hasAccount: v.boolean(),
+        // Équipes de la **saison courante** uniquement : voir `seasonLabel`.
         teamNames: v.array(v.string()),
       }),
     ),
     total: v.number(),
     truncated: v.boolean(),
+    // La saison dont `teamNames` rend compte, `null` si aucune n'est courante. L'écran
+    // l'annonce : une colonne « Équipes » muette sur la saison qu'elle montre se lit de
+    // travers dès qu'un licencié en a traversé deux.
+    seasonLabel: v.union(v.string(), v.null()),
   }),
   handler: async (ctx, { term }) => {
     await requireAdmin(ctx);
+    // L'effectif est une donnée **de saison** : un licencié qui revient d'année en année
+    // accumule les rattachements, et souvent sous le même nom d'équipe. Les empiler dans
+    // une colonne de tableau donnerait « Tulle 1, Tulle 1, Tulle 1 » sans dire de quelles
+    // saisons il s'agit, et la liste grandirait d'une ligne par an. La recherche répond à
+    // « où joue cette personne cette année » ; l'historique complet vit sur sa fiche, qui
+    // le date. Pas de repli sur la dernière saison connue si aucune n'est courante : la
+    // montrer comme actuelle serait un mensonge, une colonne vide n'en est pas un.
+    const currentSeason = await ctx.db
+      .query("seasons")
+      .withIndex("by_current", (q) => q.eq("isCurrent", true))
+      .unique();
     // Les clubs sont résolus avant le filtrage : un administrateur cherche aussi par club, et
     // ils sont trop peu nombreux pour que ça coûte quoi que ce soit.
     const clubNames = new Map(
@@ -458,13 +474,21 @@ export const search = query({
           clubName: clubNames.get(String(player.clubId)) ?? "",
           hasAccount: account !== null,
           teamNames: teams
-            .filter((team): team is NonNullable<typeof team> => team !== null)
+            .filter(
+              (team): team is NonNullable<typeof team> =>
+                team !== null && team.seasonId === currentSeason?._id,
+            )
             .map((team) => team.name)
             .sort((a, b) => a.localeCompare(b, "fr")),
         };
       }),
     );
 
-    return { players, total: matching.length, truncated: matching.length > SEARCH_LIMIT };
+    return {
+      players,
+      total: matching.length,
+      truncated: matching.length > SEARCH_LIMIT,
+      seasonLabel: currentSeason?.label ?? null,
+    };
   },
 });

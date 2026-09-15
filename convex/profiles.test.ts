@@ -10,6 +10,7 @@ import {
   modules,
   seedBothRosters,
   seedRoster,
+  seedSeason,
   setupChampionship,
   SLOT_AT,
   testLicense,
@@ -240,6 +241,62 @@ test("la recherche indique les équipes du licencié", async () => {
     term: "nom1",
   });
   expect(found.players[0]).toMatchObject({ teamNames: ["Club A 1"] });
+  expect(found.seasonLabel).toBe("2025-2026");
+});
+
+test("la recherche ne liste que les équipes de la saison courante", async () => {
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+  const [playerId] = await seedRoster(t, {
+    teamId: s.homeTeamId,
+    clubId: s.homeClubId,
+    count: 1,
+  });
+
+  // La même licenciée, la saison d'avant, dans une équipe qui porte le même nom — le cas
+  // ordinaire d'un club qui reconduit son équipe première.
+  const pastSeasonId = await seedSeason(t, { label: "2024-2025" });
+  await t.run(async (ctx) => {
+    const championshipId = await ctx.db.insert("championships", {
+      seasonId: pastSeasonId,
+      name: "Départemental mixte",
+    });
+    const teamId = await ctx.db.insert("teams", {
+      clubId: s.homeClubId,
+      seasonId: pastSeasonId,
+      championshipId,
+      name: "Club A 1",
+    });
+    await ctx.db.insert("rosterEntries", { teamId, playerId });
+  });
+
+  const found = await t.withIdentity({ subject: s.admin }).query(api.players.search, {
+    term: "nom1",
+  });
+  // Et non « Club A 1, Club A 1 », qui ne dirait pas qu'il s'agit de deux saisons.
+  expect(found.players[0].teamNames).toEqual(["Club A 1"]);
+  expect(found.seasonLabel).toBe("2025-2026");
+
+  // L'historique daté, lui, reste entier sur la fiche.
+  const fiche = await t.withIdentity({ subject: s.admin }).query(api.players.get, { playerId });
+  expect(fiche?.teams.map((team) => [team.name, team.seasonLabel]).sort()).toEqual([
+    ["Club A 1", "2024-2025"],
+    ["Club A 1", "2025-2026"],
+  ]);
+});
+
+test("sans saison courante, la recherche n'affiche aucune équipe", async () => {
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+  await seedRoster(t, { teamId: s.homeTeamId, clubId: s.homeClubId, count: 1 });
+  await t.run(async (ctx) => ctx.db.patch(s.seasonId, { isCurrent: false }));
+
+  const found = await t.withIdentity({ subject: s.admin }).query(api.players.search, {
+    term: "nom1",
+  });
+  // Pas de repli sur la dernière saison connue : la montrer comme actuelle serait faux.
+  expect(found.seasonLabel).toBeNull();
+  expect(found.players[0].teamNames).toEqual([]);
 });
 
 test("la recherche de licenciés est réservée à l'administrateur", async () => {
