@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
       "port": 3000
+    },
+    {
+      "name": "ufolep19-convex",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:convex"],
+      "port": 3210
     }
   ]
 }

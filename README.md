@@ -70,26 +70,69 @@ permis, mais ne fait jamais autorité.
 npm run seed:dev
 ```
 
-Écrit de quoi parcourir le cycle de vie d'un match à deux comptes, sur le déploiement pointé par
-`CONVEX_DEPLOYMENT`. **À ne lancer qu'en développement** : le mot de passe des comptes est en clair
-dans la sortie de la commande.
+Écrit un département entier — cinq clubs, deux saisons, trois championnats — sur le déploiement
+pointé par `CONVEX_DEPLOYMENT`. **À ne lancer qu'en développement** : le mot de passe des comptes
+est en clair dans la sortie de la commande.
 
-| Compte | Rôle | Équipe |
-| --- | --- | --- |
-| `admin@dev.ufolep19.test` | `admin` | — |
-| `tulle@dev.ufolep19.test` | `manager` | Tulle 1 |
-| `brive@dev.ufolep19.test` | `manager` | Brive 1 |
+Le jeu vise la **couverture** : chaque état du cycle de vie, chaque rôle, chaque cas de licence et
+chaque vue de pilotage a au moins une donnée qui la fait parler. Un écran vide ne dit pas s'il est
+cassé.
+
+### Comptes
 
 Mot de passe commun `ufolep19dev`, remplaçable :
 `npx convex run seed:dev '{"password":"..."}'`.
 
-Les deux équipes s'affrontent deux fois, dans un championnat de la saison courante, avec huit
-licenciés chacune à l'effectif :
+| Compte | Rôle | Équipes |
+| --- | --- | --- |
+| `admin@dev.ufolep19.test` | `admin` | — |
+| `tulle@dev.ufolep19.test` | `manager` | Tulle 1, Tulle Loisirs |
+| `tulle2@dev.ufolep19.test` | `manager` | Tulle 2 |
+| `brive@dev.ufolep19.test` | `manager` | Brive 1, Brive Loisirs |
+| `brive-adjoint@dev.ufolep19.test` | `manager` | Brive 1 (co-responsable) |
+| `ussel@dev.ufolep19.test` | `manager` | Ussel 1, Ussel Loisirs |
+| `egletons@dev.ufolep19.test` | `manager` | Égletons 1 |
+| `objat@dev.ufolep19.test` | `manager` | Objat 1, Objat Loisirs |
+| `camille.arnaud@dev.ufolep19.test` | `player` | consultation seule |
+| `claire.dumas@dev.ufolep19.test` | `player` | consultation seule |
 
-- **Journée 1**, fenêtre fermée — Tulle reçoit, le créneau est passé : le responsable de Tulle doit
-  **saisir la feuille de match**, celui de Brive la validera.
-- **Journée 2**, fenêtre ouverte aujourd'hui — Brive reçoit, aucun créneau : le responsable de
-  Brive doit **proposer un créneau**, celui de Tulle l'acceptera ou le refusera.
+Trois de ces comptes existent pour une raison précise. **Tulle 2 a son propre responsable** parce
+que les deux équipes de Tulle se rencontrent, et qu'un responsable ne peut pas valider sa propre
+proposition. **Brive 1 en a deux** parce qu'une équipe peut avoir plusieurs responsables, et qu'un
+seul par équipe ne le montrerait jamais. Les deux comptes `player` sont rattachés à une fiche
+licencié, comme le fait la création d'un licencié avec e-mail.
+
+### Compétition
+
+- **Saison courante**, *Championnat Départemental* — six équipes, calendrier toutes rondes en cinq
+  journées. Les journées 1 à 3 sont jouées (dont un **forfait**), la 4 vient de se fermer sur trois
+  matchs bloqués, la 5 est ouverte à la négociation.
+- **Saison courante**, *Championnat Loisirs* — quatre équipes, trois journées. La dernière est **en
+  retard** : sa fenêtre s'est refermée sur des matchs sans créneau.
+- **Saison précédente**, *Championnat Départemental* — quatre équipes, entièrement jouée. Elle donne
+  un classement final et fait vivre le sélecteur groupé par saison.
+
+Les scores couvrent tout le barème (3-0, 3-1, 3-2 et leurs symétriques), pour qu'aucune ligne du
+classement ne repose sur un cas jamais exercé.
+
+### Ce que chaque écran doit montrer
+
+| État / vue | Où le voir |
+| --- | --- |
+| Créneau à proposer, après un refus conservé | J5, `Tulle 1 — Tulle 2` |
+| Créneau proposé, à valider (échéance tacite programmée) | J5, `Brive 1 — Objat 1` |
+| Créneau confirmé + **demande de report** en attente | J5, `Ussel 1 — Égletons 1` |
+| Feuille à saisir (créneau passé) | J4, `Brive 1 — Tulle 1` |
+| Feuille soumise, à valider ou contester | J4, `Tulle 2 — Ussel 1` |
+| **Litige** à arbitrer | J4, `Objat 1 — Égletons 1` |
+| **Forfait** | J3, `Objat 1 — Tulle 2` |
+| Fenêtre dépassée / bientôt fermée | Administration, « matchs sans créneau à relancer » |
+| **Cumuls de joueurs** sur une même journée | Administration → championnat départemental |
+
+Côté licenciés, les trois cas s'affichent : licence en cours, licence **expirée** (le dernier
+licencié de chaque club) et fiche **sans licence** (`VIALLE Bastien`). Chaque licencié porte en
+outre une licence de la saison précédente, séparée de l'actuelle par un **trou** — le modèle
+l'autorise, et une suite continue ne le montrerait pas.
 
 La commande est **rejouable** : chaque exécution supprime d'abord le jeu précédent. Pour que cette
 purge ne morde pas sur des données saisies à la main, tout ce qu'elle crée est marqué — saisons et
