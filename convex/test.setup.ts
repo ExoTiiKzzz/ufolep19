@@ -180,6 +180,31 @@ export async function seedRoster(
 }
 
 /**
+ * Un compte de consultation rattaché à une fiche de l'effectif du receveur.
+ *
+ * Le rattachement est posé en base plutôt que par `players.create` : les tests qui s'en
+ * servent portent sur ce que le compte **voit**, pas sur le parcours de création, couvert
+ * ailleurs.
+ */
+export async function seedLicenseeAccount(
+  t: T,
+  s: { homeTeamId: Id<"teams">; homeClubId: Id<"clubs"> },
+) {
+  const [playerId] = await seedRoster(t, {
+    teamId: s.homeTeamId,
+    clubId: s.homeClubId,
+    count: 1,
+  });
+  const userId = await seedAccount(t, {
+    email: "licenciee@club-a.fr",
+    name: "Licenciée Club A",
+    role: "player",
+  });
+  await t.run(async (ctx) => ctx.db.patch(userId, { playerId }));
+  return { userId, playerId };
+}
+
+/**
  * Amène un match à l'état « créneau ferme » sans rejouer la négociation, pour les tests
  * qui portent sur la suite du cycle de vie.
  */

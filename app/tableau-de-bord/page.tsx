@@ -4,6 +4,7 @@ import { useQuery } from "convex/react";
 import Link from "next/link";
 
 import { ClubLogo } from "@/components/club-logo";
+import { MatchRow } from "@/components/match-row";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/convex/_generated/api";
@@ -11,10 +12,18 @@ import { formatCountdown, formatDateTime } from "@/lib/format";
 import { todoLabels } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 
+/**
+ * Combien de matchs joués la carte rappelle. Un licencié qui traverse les saisons en
+ * accumule des dizaines : les dérouler tous ferait du tableau de bord une archive.
+ * Le compte est écrit dans la carte — une liste tronquée en silence se lit comme complète.
+ */
+const LATEST_RESULTS = 5;
+
 export default function DashboardPage() {
   const account = useQuery(api.users.me);
   const todo = useQuery(api.matches.myTodo, account === null ? "skip" : {});
   const teams = useQuery(api.teams.mine, account === null ? "skip" : {});
+  const calendar = useQuery(api.matches.mine, account === null ? "skip" : {});
 
   if (account === undefined) {
     return <main className="mx-auto max-w-3xl px-6 py-10 text-sm">Chargement…</main>;
@@ -35,6 +44,14 @@ export default function DashboardPage() {
 
   const actionable = (todo ?? []).filter((row) => row.action !== "waiting");
   const waiting = (todo ?? []).filter((row) => row.action === "waiting");
+
+  // `matches.mine` rend le calendrier du plus ancien au plus récent : les matchs à venir
+  // se lisent dans cet ordre, les résultats à l'envers — le dernier joué d'abord.
+  const upcoming = (calendar ?? []).filter((match) => match.state !== "completed");
+  const results = (calendar ?? [])
+    .filter((match) => match.state === "completed")
+    .reverse()
+    .slice(0, LATEST_RESULTS);
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-10">
@@ -152,11 +169,50 @@ export default function DashboardPage() {
         </Card>
       )}
 
+      {/*
+       * Le calendrier personnel : la seule chose que voie un compte de rôle joueur, qui n'a
+       * aucune action à mener et dont les deux cartes précédentes resteraient donc vides.
+       */}
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle className="text-base">Mon calendrier</CardTitle>
+          <CardDescription>
+            Les matchs de vos équipes, à venir puis les {LATEST_RESULTS} derniers résultats.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-1">
+          {calendar === undefined ? (
+            <p className="text-muted-foreground text-sm">Chargement…</p>
+          ) : upcoming.length === 0 && results.length === 0 ? (
+            <p className="text-muted-foreground text-sm">Aucun match à votre calendrier.</p>
+          ) : (
+            <>
+              {upcoming.length === 0 ? (
+                <p className="text-muted-foreground text-sm">Plus aucun match à venir.</p>
+              ) : (
+                upcoming.map((match) => <MatchRow key={match._id} match={match} showMatchday />)
+              )}
+              {results.length === 0 ? null : (
+                <>
+                  <p className="text-muted-foreground mt-4 px-2 text-xs font-medium uppercase">
+                    Derniers résultats
+                  </p>
+                  {results.map((match) => (
+                    <MatchRow key={match._id} match={match} showMatchday />
+                  ))}
+                </>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
+
       <Card className="mt-6">
         <CardHeader>
           <CardTitle className="text-base">Mes équipes</CardTitle>
           <CardDescription>
-            Les équipes qui vous sont rattachées. Le comité gère ces rattachements.
+            Les équipes que vous gérez et celles dont vous faites partie. Le comité gère ces
+            rattachements.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-1">
@@ -177,6 +233,12 @@ export default function DashboardPage() {
                 <span className="text-muted-foreground">
                   {team.championshipName} · saison {team.seasonLabel}
                 </span>
+                {/* Une saison close est une information neutre, pas une alerte : gris. */}
+                {team.isCurrentSeason ? null : (
+                  <Badge variant="muted" className="ml-auto">
+                    Saison archivée
+                  </Badge>
+                )}
               </Link>
             ))
           )}

@@ -2,7 +2,7 @@ import { ConvexError, v } from "convex/values";
 
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query, type QueryCtx } from "./_generated/server";
-import { managedTeamIds, requireAdmin, requireUser } from "./authz";
+import { attachedTeamIds, managedTeamIds, requireAdmin, requireUser } from "./authz";
 import { matchResult, matchState, slot } from "./schema";
 
 export const matchSummary = v.object({
@@ -359,6 +359,34 @@ async function classifyTodo(
 
   return { action, deadline };
 }
+
+/**
+ * Tous les matchs des équipes rattachées au compte connecté, du plus ancien au plus récent.
+ *
+ * C'est le calendrier personnel, en **lecture seule** : il part de `attachedTeamIds`, donc
+ * un compte de rôle `player` y voit les matchs des équipes dont sa fiche fait partie. Rien
+ * ici n'ouvre de droit — ce que le compte peut *faire* reste décidé par `myTodo`, qui ne
+ * regarde que les équipes gérées.
+ *
+ * Trié par date réelle, et non par numéro de journée : un compte peut suivre deux
+ * championnats à la fois, dont les journées 3 ne tombent pas le même mois. Un match sans
+ * créneau se range à l'ouverture de sa fenêtre, là où il se jouera.
+ */
+export const mine = query({
+  args: {},
+  returns: v.array(matchSummary),
+  handler: async (ctx) => {
+    const user = await requireUser(ctx);
+    const teamIds = await attachedTeamIds(ctx, user);
+    if (teamIds.length === 0) {
+      return [];
+    }
+    const matches = await matchesOfTeams(ctx, teamIds);
+    const cache = newTeamCache();
+    const summaries = await Promise.all(matches.map((match) => summarize(ctx, match, cache)));
+    return summaries.sort((a, b) => (a.slot?.at ?? a.windowStart) - (b.slot?.at ?? b.windowStart));
+  },
+});
 
 /** Ce qui attend l'action du compte connecté, sur les équipes qu'il gère. */
 export const myTodo = query({

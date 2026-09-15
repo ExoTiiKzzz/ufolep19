@@ -424,6 +424,19 @@ Deux points qui découlent des règles de palette :
 Le compte vient de `matches.myTodoCount`, qui partage son classement avec `matches.myTodo` —
 les deux nombres ne peuvent pas diverger, et un test le vérifie.
 
+**Tableau de bord : deux rattachements, pas un.** La carte « À traiter » et le compteur partent des
+équipes **gérées** (`teamManagers`) ; « Mon calendrier » et « Mes équipes » partent des équipes
+**rattachées** — celles qu'on gère *et* celles dont la fiche Joueur du compte fait partie
+(`rosterEntries` sur `users.playerId`). Sans cette seconde liste, un compte `player` n'aurait
+strictement rien à l'écran, alors que son rôle est justement de consulter ses équipes, son
+calendrier et ses résultats.
+
+Les deux listes vivent dans `convex/authz.ts` sous deux noms distincts — `managedTeamIds` et
+`attachedTeamIds` — et ce n'est pas de la cosmétique : substituer la seconde à la première dans un
+chemin d'écriture donnerait à n'importe quel licencié la main sur la feuille de match de son
+équipe. Un test vérifie qu'un compte à l'effectif d'une équipe dont un match attend un créneau a
+bien un `myTodo` vide et un compteur à zéro.
+
 **Page d'accueil** : elle montre un championnat par défaut — le premier de la saison courante — avec
 son classement, puis la journée en cours, ou la prochaine si aucune fenêtre n'est ouverte, ou la
 dernière si la saison est finie. Un sélecteur groupé par saison permet de changer de championnat

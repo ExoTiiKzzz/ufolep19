@@ -3,7 +3,15 @@ import { afterEach, expect, test, vi } from "vitest";
 
 import { api } from "./_generated/api";
 import schema from "./schema";
-import { modules, seedAccount, setupChampionship, testLicense } from "./test.setup";
+import {
+  modules,
+  seedAccount,
+  seedLicenseeAccount,
+  seedRoster,
+  seedSeason,
+  setupChampionship,
+  testLicense,
+} from "./test.setup";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -168,6 +176,88 @@ test("un compte de rôle joueur ne peut pas être rattaché comme responsable", 
       .withIdentity({ subject: s.admin })
       .mutation(api.teams.addManager, { teamId: s.homeTeamId, userId: player }),
   ).rejects.toThrow(/rôle joueur/i);
+});
+
+test("un compte rattaché à une fiche voit les équipes de son effectif", async () => {
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+  const { userId, playerId } = await seedLicenseeAccount(t, s);
+
+  // La même licenciée à l'effectif d'une équipe d'une saison close. Elle doit la voir —
+  // un licencié traverse les saisons — mais après celle qui se joue.
+  const pastSeasonId = await seedSeason(t, { label: "2024-2025" });
+  await t.run(async (ctx) => {
+    const championshipId = await ctx.db.insert("championships", {
+      seasonId: pastSeasonId,
+      name: "Départemental mixte",
+    });
+    const teamId = await ctx.db.insert("teams", {
+      clubId: s.homeClubId,
+      seasonId: pastSeasonId,
+      championshipId,
+      name: "Club A 1 (2024-2025)",
+    });
+    await ctx.db.insert("rosterEntries", { teamId, playerId });
+  });
+
+  const teams = await t.withIdentity({ subject: userId }).query(api.teams.mine, {});
+  expect(teams.map((team) => [team.name, team.isCurrentSeason, team.managerOf])).toEqual([
+    ["Club A 1", true, false],
+    ["Club A 1 (2024-2025)", false, false],
+  ]);
+});
+
+test("figurer à l'effectif ne donne aucune action sur les matchs", async () => {
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+  const { userId } = await seedLicenseeAccount(t, s);
+
+  // Le match de son équipe attend bien un créneau : son responsable, lui, a la main.
+  expect(
+    (await t.withIdentity({ subject: s.homeManager }).query(api.matches.myTodo, {})).map(
+      (row) => row.action,
+    ),
+  ).toEqual(["proposeSlot"]);
+
+  // Elle, non. Les droits viennent du rattachement de responsable, jamais de l'effectif :
+  // sans quoi n'importe quel licencié proposerait le créneau de son équipe.
+  const asLicensee = t.withIdentity({ subject: userId });
+  expect(await asLicensee.query(api.matches.myTodo, {})).toEqual([]);
+  expect(await asLicensee.query(api.matches.myTodoCount, {})).toBe(0);
+});
+
+test("le calendrier personnel d'un licencié suit son effectif", async () => {
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+  const { userId } = await seedLicenseeAccount(t, s);
+
+  expect(
+    (await t.withIdentity({ subject: userId }).query(api.matches.mine, {})).map(
+      (match) => match._id,
+    ),
+  ).toEqual([s.matchId]);
+
+  // Un compte sans fiche rattachée ni équipe gérée n'a pas de calendrier à lui.
+  const stranger = await seedAccount(t, {
+    email: "sans-fiche@club-a.fr",
+    name: "Sans fiche",
+    role: "player",
+  });
+  expect(await t.withIdentity({ subject: stranger }).query(api.matches.mine, {})).toEqual([]);
+});
+
+test("un responsable aussi licencié ne voit pas son équipe en double", async () => {
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+  const [playerId] = await seedRoster(t, {
+    teamId: s.homeTeamId,
+    clubId: s.homeClubId,
+    count: 1,
+  });
+  await t.run(async (ctx) => ctx.db.patch(s.homeManager, { playerId }));
+
+  const teams = await t.withIdentity({ subject: s.homeManager }).query(api.teams.mine, {});
+  expect(teams.map((team) => [team.name, team.managerOf])).toEqual([["Club A 1", true]]);
 });
 
 test("le rattachement d'un compte à une fiche joueur est facultatif", async () => {
