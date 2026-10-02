@@ -33,13 +33,17 @@ Principes :
 ## Modèle de domaine
 
 ```
-Saison ──< Championnat ──< Journée ──< Match >── Équipe >── Club ──< Joueur ──< Licence
-                                       │                              │
-                                       └──< Set                       │
-                                       └──< Composition >─────────────┘
+Saison ──< Circuit ──< Championnat ──< Journée ──< Match >── Équipe >── Club ──< Joueur ──< Licence
+                                                   │            │                 │
+                                                   └──< Set     └──< Effectif >───┤
+                                                   └──< Composition >─────────────┘
 ```
 
-- **Saison** — cycle annuel (ex. 2025-2026). Regroupe les championnats.
+- **Saison** — cycle annuel (ex. 2025-2026). Regroupe les circuits et leurs championnats.
+- **Circuit** — groupe de championnats d'une saison, créé par l'administrateur, à l'intérieur
+  duquel un joueur ne figure que sur **une seule feuille verte**. Le circuit principal regroupe
+  D1, D2, D3 et le mixte ; la coupe et le féminin ont chacun le leur, donc leurs propres
+  feuilles vertes.
 - **Club** — structure locale. Rattache des joueurs et une ou plusieurs équipes. **Traverse les
   saisons.** Porte une salle par défaut et, facultativement, un **logo** (voir « Fichiers »).
 - **Joueur** — fiche d'un licencié rattaché à un club. **Traverse les saisons.** Existe sans compte
@@ -49,10 +53,15 @@ Saison ──< Championnat ──< Journée ──< Match >── Équipe >─�
 - **Licence** — un numéro et sa période de validité, rattachés à un joueur. Un joueur en accumule
   plusieurs au fil des saisons ; hors de sa période, une licence n'autorise plus à jouer.
 - **Équipe** — appartient à un club et à **une seule saison**, engagée dans un championnat. Porte
-  un effectif et un ou plusieurs **responsables**. Une nouvelle saison = de nouvelles équipes, avec
-  reprise possible de l'effectif précédent.
+  un effectif — la **feuille verte**, son libellé dans l'UI — et un ou plusieurs **responsables**.
+  Une nouvelle saison = de nouvelles équipes, avec reprise possible de la feuille verte précédente.
 - **Championnat** — compétition d'une saison regroupant N équipes. Porte le calendrier et le
-  classement.
+  classement, et trois réglages **indépendants** : son **circuit** (unicité de la feuille
+  verte), son **niveau** (1 = le plus fort ; « D1, D2, D3 », le mixte est de niveau 3) et son
+  **format** (`standard` ou `plateau` : règles de score et de classement). Pas de case « coupe »
+  ou « féminin » qui mêlerait ces axes. Un championnat peut porter un **quota de renforts**
+  (le mixte, voir « Renforts »). Le format ne se change plus une fois des journées créées ; le
+  circuit ne change que si l'unicité des feuilles vertes y survit.
 - **Journée** — regroupement numéroté de matchs, borné par une **fenêtre de dates**. Un match
   appartient à exactement une journée.
 - **Match** — rencontre entre un **receveur** et un **visiteur** du même championnat. Porte le
@@ -84,6 +93,21 @@ La mutation de création de match rejette ou signale :
 
 Le créneau proposé pour un match doit tomber **dans la fenêtre de dates de sa journée**. La fenêtre
 fait office de date butoir de négociation.
+
+### Plateau
+
+Dans un championnat au format **plateau** (le féminin), chaque journée est un **plateau** : une
+date, une heure et une salle fixées par l'administrateur, communes à tous ses matchs. Une équipe
+y joue autant de matchs que l'administrateur en programme.
+
+- Les matchs naissent **Confirmés**, au créneau du plateau : ni proposition, ni validation
+  tacite, ni report entre responsables (`negotiation` les refuse). Déplacer le plateau
+  (`matchdays.updatePlateau`) déplace ses matchs non joués.
+- C'est **l'administrateur** qui saisit score et compositions (`sheets.record`) : le match passe
+  directement à **Terminé**, sans validation du visiteur. Le receveur n'a que le rôle de colonne
+  sur la feuille. Les plateaux n'apparaissent pas dans « à traiter ».
+- La composition d'une équipe est reprise par défaut de son match précédent du même plateau,
+  et s'ajuste match par match.
 
 ## Cycle de vie d'un match
 
@@ -152,6 +176,8 @@ l'administrateur prononce un forfait.
 
 ## Règles de score (volley)
 
+Format **standard** :
+
 - Match au **meilleur des 5 sets** : la première équipe à **3 sets gagnés** remporte le match.
 - Les 4 premiers sets se jouent en **25 points**, le **tie-break** (5e set) en **15 points**.
 - Un set se gagne avec **au moins 2 points d'écart**, avec **prolongation illimitée** (26-24,
@@ -160,8 +186,17 @@ l'administrateur prononce un forfait.
   (et leurs symétriques). Aucun set supplémentaire ne peut être saisi.
 - Le tie-break ne se joue qu'à 2 sets partout.
 
-La validation de ces règles est implémentée **côté Convex**, dans une fonction pure et testée,
-appelée par la mutation de saisie de la feuille de match. Un score invalide est rejeté avec un
+Format **plateau** :
+
+- **2 sets secs** en 25 points, **joués tous les deux** même à 2-0. Pas de tie-break.
+- Même règle de set : 2 points d'écart, prolongation illimitée.
+- À un set partout, le vainqueur est celui qui a marqué **le plus de points** ; à égalité de
+  points, le match est **nul** — un match terminé n'a alors pas de vainqueur
+  (`result.winnerTeamId` absent). Voir
+  [ADR-0005](./docs/adr/0005-renforts-signales-et-match-nul.md).
+
+La validation de ces règles est implémentée **côté Convex**, dans une fonction pure et testée
+(`validateMatchScore(sets, format)`), appelée par la mutation de saisie de la feuille de match. Un score invalide est rejeté avec un
 message explicite, jamais silencieusement corrigé.
 
 ## Feuille de match et compositions
@@ -171,17 +206,59 @@ par set et les compositions des deux équipes ; le visiteur valide l'ensemble en
 Pourquoi le receveur saisit la composition adverse :
 [ADR-0003](./docs/adr/0003-feuille-de-match-transcrite-par-le-receveur.md).
 
-Règles de validation d'une composition :
+Règles de validation d'une composition — ce qui est **rejeté** :
 
-- Sous-ensemble de l'**effectif** de l'équipe pour la saison.
-- **Au plus 12 joueurs**, et **aucun minimum** : jouer en sous-effectif (à 5, à 4) est permis —
-  c'est un désavantage sportif, pas un motif de forfait. Le format de jeu (6x6, 4x4) n'est donc
-  **pas modélisé**.
-- Une composition vide est refusée : c'est une feuille non remplie, pas un sous-effectif.
-- Un même joueur deux fois sur la même feuille (les deux compositions d'un même match) est
-  **rejeté**.
-- Un même joueur aligné pour deux équipes différentes dans la même journée est **autorisé**, mais
-  remonté dans une vue de contrôle de l'administrateur.
+- un joueur d'un **autre club** que l'équipe : un renfort vient de son propre club ;
+- une **licence** qui ne couvre pas la date du match (voir « Licences ») ;
+- **plus de 12 joueurs** ; **aucun minimum** en revanche : jouer en sous-effectif (à 5, à 4)
+  est permis — c'est un désavantage sportif, pas un motif de forfait. Le format de jeu (6x6,
+  4x4) n'est donc **pas modélisé** ;
+- une composition vide : c'est une feuille non remplie, pas un sous-effectif ;
+- un même joueur deux fois sur la même feuille (les deux compositions d'un même match).
+
+Tout le reste est **signalé, jamais rejeté** : un joueur du club absent de la feuille verte de
+l'équipe est un **renfort** (voir ci-dessous). Un même joueur aligné pour deux équipes
+différentes dans la même journée est autorisé, mais remonté dans une vue de contrôle de
+l'administrateur.
+
+## Feuilles vertes
+
+La feuille verte est l'**effectif** d'une équipe (`rosterEntries`) ; « Feuille verte » est son
+libellé dans l'UI. Un licencié figure sur **au plus une feuille verte par circuit et par
+saison** — `roster.add` le refuse en nommant l'autre équipe, et la reprise de la feuille verte
+précédente laisse de côté, en les listant, les joueurs déjà inscrits ailleurs. Il peut en
+revanche avoir sa feuille verte en championnat, une autre en coupe, une autre au féminin.
+
+L'inscription se fait en cherchant parmi les licenciés du club, par nom ou par numéro de licence
+(périmé compris).
+
+## Renforts
+
+Un **renfort** est un joueur aligné dans une équipe de son club qui n'est pas celle de sa feuille
+verte dans le circuit du match. Un renfort n'est **jamais refusé** : il est **signalé** sur la
+feuille de match, et c'est aux équipes et au comité d'en juger —
+[ADR-0005](./docs/adr/0005-renforts-signales-et-match-nul.md).
+
+Le niveau d'origine d'un joueur est celui du championnat de sa feuille verte. Sont signalés :
+
+- un joueur **sans feuille verte** dans le circuit ;
+- une **descente** : un joueur d'un niveau plus fort aligné plus bas ;
+- le **4ᵉ match et les suivants** joués au-dessus de son niveau d'origine, **tous niveaux
+  supérieurs confondus** sur la saison. Le compteur suit l'ordre des **dates de match**, pas
+  celui de la saisie, et compte les feuilles **soumises** (en attente, validées, en litige) :
+  attendre la validation laisserait enchaîner les matchs sans un signalement ;
+- dans un championnat à **quota** (le mixte : 2 joueurs, pour compléter à 6), les joueurs venus
+  d'un niveau plus fort sont admis, mais signalés s'ils sont plus nombreux que le quota, ou si la
+  composition dépasse le total qu'ils ne doivent que compléter.
+
+Le saut de plusieurs niveaux est permis. Un renfort **au même niveau** (D3 ↔ mixte) est affiché,
+mais ni signalé ni compté.
+
+Les règles vivent dans un module pur (`lib/rules/reinforcement.ts`), utilisé par Convex et par
+l'écran de composition, qui annonce les signalements au fil des cases cochées. Les signalements
+sont **recalculés à la lecture** — un changement de niveau ou de quota s'y reflète aussitôt — et
+relèvent du déroulé administratif : `sheets.get` (responsables des deux équipes, admin) et la
+vue `adminViews.reinforcementFlags` les exposent, jamais la query publique.
 
 ## Licences
 
@@ -230,17 +307,18 @@ migrée n'a plus de numéro hérité et est ignorée.
 Un forfait est **prononcé par un administrateur** — jamais déduit automatiquement de la taille
 d'une composition. Il termine le match sur un score conventionnel :
 
-- **3-0 en sets**, chaque set à **25-0** (donc 75-0 en points marqués) ;
+- **3-0 en sets**, chaque set à **25-0** (donc 75-0 en points marqués) — **2-0** en plateau ;
 - **0 point de classement** pour l'équipe défaillante, le barème normal s'appliquant au vainqueur
   (3 points).
 
 ## Classement
 
 Un classement est calculé **par championnat**, dérivé des matchs terminés (jamais stocké comme
-état modifiable à la main). Il expose par équipe : matchs joués, victoires, défaites, sets
-gagnés/perdus, points marqués/encaissés, et le total de points de classement.
+état modifiable à la main). Il expose par équipe : matchs joués, victoires, nuls, défaites, sets
+gagnés/perdus, points marqués/encaissés, et le total de points de classement. La colonne des nuls
+n'est affichée qu'au format plateau.
 
-Barème :
+Barème standard :
 
 | Résultat | Points |
 | --- | --- |
@@ -248,6 +326,19 @@ Barème :
 | Victoire 3-2 | **2** |
 | Défaite 2-3 | **1** |
 | Défaite 0-3 ou 1-3 | **0** |
+
+Barème plateau — **provisoire**, en attente de confirmation par l'UFOLEP 19 :
+
+| Résultat | Points |
+| --- | --- |
+| Victoire 2-0 | **3** |
+| Victoire 1-1 aux points | **2** |
+| Match nul (1-1, points égaux) | **1** |
+| Défaite 1-1 aux points | **1** |
+| Défaite 0-2 | **0** |
+
+La Coupe de Corrèze se joue pour l'instant comme un championnat standard, dans son propre
+circuit, avec le classement classique — en attente de son règlement.
 
 Départage, dans cet ordre :
 
@@ -466,8 +557,8 @@ Conventions :
 - Les règles métier pures (validation d'un score, calcul du classement, barème) sont isolées dans
   des modules sans dépendance à Convex ni à React, pour être testables directement.
 - Nommage du domaine en français dans l'UI, en anglais dans le code (`team`, `club`, `player`,
-  `championship`, `match`, `set`, `matchday`, `lineup`) — les identifiants de référence sont dans
-  [CONTEXT.md](./CONTEXT.md).
+  `championship`, `match`, `set`, `matchday`, `lineup`, `circuit`, `level`) — les identifiants
+  de référence sont dans [CONTEXT.md](./CONTEXT.md).
 - Chaque accès à une donnée passe par un index Convex explicite ; pas de `filter` sur table
   complète dans un chemin critique.
 - Une liste de matchs partage un **cache d'équipes par requête** (`newTeamCache`) : sans lui, un

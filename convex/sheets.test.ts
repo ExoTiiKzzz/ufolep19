@@ -183,7 +183,7 @@ test("une équipe venue à cinq est enregistrée telle quelle", async () => {
   expect(sheet?.awayLineup).toHaveLength(5);
 });
 
-test("un joueur hors de l'effectif est refusé", async () => {
+test("un joueur d'un autre club est refusé : ce n'est pas un renfort", async () => {
   const t = convexTest(schema, modules);
   const { s, rosters } = await playedMatch(t);
 
@@ -192,9 +192,9 @@ test("un joueur hors de l'effectif est refusé", async () => {
       matchId: s.matchId,
       sets: VALID_SETS,
       homeLineup: [rosters.away[0], ...rosters.home.slice(0, 5)],
-      awayLineup: rosters.away.slice(0, 6),
+      awayLineup: rosters.away.slice(1, 7),
     }),
-  ).rejects.toThrow(/n'appartient pas à l'effectif/i);
+  ).rejects.toThrow(/pas licencié au club de Club A 1/i);
 });
 
 test("le même joueur dans les deux compositions du match est refusé", async () => {
@@ -203,12 +203,10 @@ test("le même joueur dans les deux compositions du match est refusé", async ()
   vi.setSystemTime(new Date(SLOT_AT - 7 * 86_400_000));
   const s = await setupChampionship(t);
   const rosters = await seedBothRosters(t, s);
-  // Le joueur est inscrit dans les deux effectifs : cas limite, seule la feuille le bloque.
+  // Deux équipes du même club s'affrontent : un joueur de l'une pourrait renforcer l'autre,
+  // mais pas jouer des deux côtés du filet.
   await t.run(async (ctx) => {
-    await ctx.db.insert("rosterEntries", {
-      teamId: s.awayTeamId,
-      playerId: rosters.home[0],
-    });
+    await ctx.db.patch(s.awayTeamId, { clubId: s.homeClubId });
   });
   await forceConfirmed(t, { matchId: s.matchId, proposedBy: s.homeManager });
   vi.setSystemTime(new Date(SLOT_AT + 3_600_000));
@@ -218,7 +216,7 @@ test("le même joueur dans les deux compositions du match est refusé", async ()
       matchId: s.matchId,
       sets: VALID_SETS,
       homeLineup: rosters.home.slice(0, 6),
-      awayLineup: [rosters.home[0], ...rosters.away.slice(0, 5)],
+      awayLineup: [rosters.home[0], ...rosters.home.slice(6, 8)],
     }),
   ).rejects.toThrow(/deux compositions/i);
 });

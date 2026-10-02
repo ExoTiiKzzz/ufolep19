@@ -46,7 +46,11 @@ export function MatchRow({
       {match.result === undefined ? null : (
         <span className="font-semibold">
           {formatSets(match.result.homeSets, match.result.awaySets)}
-          {match.forfeitAgainst === undefined ? "" : " (forfait)"}
+          {match.forfeitAgainst !== undefined
+            ? " (forfait)"
+            : match.result.winnerTeamId === undefined
+              ? " (nul)"
+              : ""}
         </span>
       )}
       <span className="text-muted-foreground">

@@ -169,14 +169,15 @@ export default function PlayerPage() {
 
       <Card className="mt-8">
         <CardHeader>
-          <CardTitle className="text-base">Équipes</CardTitle>
+          <CardTitle className="text-base">Feuilles vertes</CardTitle>
           <CardDescription>
-            Un joueur peut appartenir à plusieurs équipes de son club.
+            Une par circuit et par saison : le championnat, la coupe et le féminin ont chacun les
+            leurs.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2 text-sm">
           {player.teams.length === 0 ? (
-            <p className="text-muted-foreground">Cette fiche n&apos;est dans aucun effectif.</p>
+            <p className="text-muted-foreground">Cette fiche n&apos;est sur aucune feuille verte.</p>
           ) : (
             player.teams.map((team) => (
               <Link key={team._id} href={`/equipes/${team._id}`}>

@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest";
 
-import { computeStandings, pointsForResult, type MatchOutcome } from "./standings";
+import {
+  computeStandings,
+  plateauPointsForResult,
+  pointsForResult,
+  type MatchOutcome,
+} from "./standings";
 
 function outcome(
   home: string,
@@ -144,4 +149,38 @@ test("un forfait est homogène : 3 points au vainqueur, 0 au fautif, 75-0 en poi
     ["a", 3, 75, 0],
     ["b", 0, 0, 75],
   ]);
+});
+
+describe("barème plateau (provisoire)", () => {
+  test.each([
+    ["victoire 2-0", 2, 0, 50, 30, 3],
+    ["victoire 1-1 aux points", 1, 1, 48, 40, 2],
+    ["match nul", 1, 1, 48, 48, 1],
+    ["défaite 1-1 aux points", 1, 1, 40, 48, 1],
+    ["défaite 0-2", 0, 2, 30, 50, 0],
+  ])("%s rapporte %i point(s)", (_label, setsWon, setsLost, pointsFor, pointsAgainst, expected) => {
+    expect(plateauPointsForResult({ setsWon, setsLost, pointsFor, pointsAgainst })).toBe(expected);
+  });
+
+  test("un match nul compte comme nul pour les deux équipes", () => {
+    const rows = computeStandings(["a", "b"], [outcome("a", "b", 1, 1, 48, 48)], "plateau");
+    for (const row of rows) {
+      expect(row).toMatchObject({ played: 1, wins: 0, draws: 1, losses: 0, points: 1 });
+    }
+    // Rien ne les sépare : ex aequo.
+    expect(rows.map((row) => row.rank)).toEqual([1, 1]);
+  });
+
+  test("à un set partout, le vainqueur aux points prend la victoire", () => {
+    const rows = computeStandings(["a", "b"], [outcome("a", "b", 1, 1, 40, 48)], "plateau");
+    expect(rows.map((row) => [row.teamId, row.wins, row.losses, row.points])).toEqual([
+      ["b", 1, 0, 2],
+      ["a", 0, 1, 1],
+    ]);
+  });
+
+  test("le format standard garde son barème", () => {
+    const rows = computeStandings(["a", "b"], [outcome("a", "b", 3, 2, 110, 100)]);
+    expect(rows.map((row) => row.points)).toEqual([2, 1]);
+  });
 });

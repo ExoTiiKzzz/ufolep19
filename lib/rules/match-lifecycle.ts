@@ -23,6 +23,7 @@ export type MatchTransition =
   | "tacitSheet"
   | "disputeSheet"
   | "settleDispute"
+  | "recordResult"
   | "forfeit";
 
 /** Qui agit, du point de vue du match. */
@@ -41,6 +42,8 @@ const RULES: Record<MatchTransition, Rule> = {
   tacitSheet: { from: ["awaitingSheet"], actors: ["system"], to: "completed" },
   disputeSheet: { from: ["awaitingSheet"], actors: ["away", "admin"], to: "disputed" },
   settleDispute: { from: ["disputed"], actors: ["admin"], to: "completed" },
+  // Plateau : l'administrateur saisit lui-même le résultat, sans validation du visiteur.
+  recordResult: { from: ["confirmed"], actors: ["admin"], to: "completed" },
   forfeit: {
     from: ["planned", "awaitingSlot", "confirmed", "awaitingSheet", "disputed"],
     actors: ["admin"],
@@ -94,5 +97,6 @@ export const transitionLabels: Record<MatchTransition, string> = {
   tacitSheet: "valider tacitement la feuille de match",
   disputeSheet: "contester la feuille de match",
   settleDispute: "arbitrer le litige",
+  recordResult: "saisir le résultat du plateau",
   forfeit: "prononcer un forfait",
 };

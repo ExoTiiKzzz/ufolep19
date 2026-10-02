@@ -1,6 +1,11 @@
 import { ConvexError, v } from "convex/values";
 
-import { forfeitScore, validateMatchScore, type SetScore } from "../lib/rules/score";
+import {
+  forfeitScore,
+  validateMatchScore,
+  type MatchFormat,
+  type SetScore,
+} from "../lib/rules/score";
 import { parisParts } from "../lib/rules/paris-time";
 import { sheetTacitDeadline } from "../lib/rules/tacit";
 import { internal } from "./_generated/api";
@@ -13,8 +18,15 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 import { requireAdmin } from "./authz";
-import { newLicenseCache, statusAt, type LicenseCache } from "./licenses";
+import { licenseStatus, newLicenseCache, statusAt, type LicenseCache } from "./licenses";
 import { actorFor, sidesOf, transitionTo } from "./negotiation";
+import {
+  assessTeamLineup,
+  candidateFor,
+  newChampionshipCache,
+  reinforcementInfo,
+} from "./reinforcements";
+import { reinforcementQuota } from "./schema";
 
 type Ctx = QueryCtx | MutationCtx;
 
@@ -37,15 +49,32 @@ async function sheetOf(ctx: Ctx, matchId: Id<"matches">) {
     .unique();
 }
 
-/** Valide le score et rend le résultat orienté receveur / visiteur. */
-function resultFrom(match: Doc<"matches">, sets: SetScore[]) {
-  const validation = validateMatchScore(sets);
+/** Format du championnat d'un match : il décide des règles de score. */
+async function formatOf(ctx: Ctx, match: Doc<"matches">): Promise<MatchFormat> {
+  const championship = await ctx.db.get(match.championshipId);
+  if (championship === null) {
+    throw new ConvexError("Championnat inconnu.");
+  }
+  return championship.format;
+}
+
+/**
+ * Valide le score selon le format du championnat et rend le résultat orienté receveur /
+ * visiteur. Un match nul — plateau seulement — n'a pas de vainqueur.
+ */
+function resultFrom(match: Doc<"matches">, sets: SetScore[], format: MatchFormat) {
+  const validation = validateMatchScore(sets, format);
   if (!validation.ok) {
     throw new ConvexError(validation.error.message);
   }
   const { outcome } = validation;
   return {
-    winnerTeamId: outcome.winner === "home" ? match.homeTeamId : match.awayTeamId,
+    winnerTeamId:
+      outcome.winner === "draw"
+        ? undefined
+        : outcome.winner === "home"
+          ? match.homeTeamId
+          : match.awayTeamId,
     homeSets: outcome.homeSets,
     awaySets: outcome.awaySets,
     homePoints: outcome.homePoints,
@@ -54,11 +83,15 @@ function resultFrom(match: Doc<"matches">, sets: SetScore[]) {
 }
 
 /**
- * Vérifie une composition et rend la liste des joueurs alignés.
+ * Vérifie une composition.
  *
  * Au plus 12 joueurs, **aucun minimum** : jouer en sous-effectif est un désavantage
  * sportif, pas un motif de forfait. Une composition vide est en revanche refusée : c'est
  * une feuille non remplie.
+ *
+ * Tout licencié **du club** de l'équipe peut être aligné : un joueur hors de sa feuille
+ * verte est un renfort, **signalé** et jamais refusé (ADR-0005). Restent des rejets ce qui
+ * n'est pas une question sportive — un joueur d'un autre club, une licence non valide.
  *
  * Chaque joueur doit être **licencié à la date du match**, `playedAt` — et non à l'instant
  * de la saisie. Une feuille transcrite trois jours plus tard ne peut pas rejeter un joueur
@@ -86,17 +119,21 @@ async function checkLineup(
   if (new Set(playerIds).size !== playerIds.length) {
     throw new ConvexError(`Composition ${label} : un joueur y figure deux fois.`);
   }
+  const team = await ctx.db.get(teamId);
+  if (team === null) {
+    throw new ConvexError("Équipe inconnue.");
+  }
   for (const playerId of playerIds) {
     const player = await ctx.db.get(playerId);
-    const who = player === null ? "Ce joueur" : `${player.firstName} ${player.lastName}`;
+    if (player === null) {
+      throw new ConvexError(`Composition ${label} : joueur inconnu.`);
+    }
+    const who = `${player.firstName} ${player.lastName}`;
 
-    const entry = await ctx.db
-      .query("rosterEntries")
-      .withIndex("by_team_and_player", (q) => q.eq("teamId", teamId).eq("playerId", playerId))
-      .unique();
-    if (entry === null) {
+    if (player.clubId !== team.clubId) {
       throw new ConvexError(
-        `${who} n'appartient pas à l'effectif de l'équipe (composition ${label}).`,
+        `${who} n'est pas licencié au club de ${team.name} : un renfort vient de son ` +
+          `propre club (composition ${label}).`,
       );
     }
 
@@ -108,6 +145,53 @@ async function checkLineup(
           : `La licence de ${who} ne couvre pas la date du match — elle expirait le ` +
             `${formatLicenseDate(license.validUntil)} (composition ${label}).`,
       );
+    }
+  }
+}
+
+/** Vérifie les deux compositions d'une feuille, et qu'aucun joueur ne figure des deux côtés. */
+async function checkLineups(
+  ctx: MutationCtx,
+  match: Doc<"matches">,
+  playedAt: number,
+  homeLineup: Id<"players">[],
+  awayLineup: Id<"players">[],
+) {
+  const licenses = newLicenseCache();
+  await checkLineup(ctx, match.homeTeamId, homeLineup, "receveur", playedAt, licenses);
+  await checkLineup(ctx, match.awayTeamId, awayLineup, "visiteur", playedAt, licenses);
+  if (homeLineup.some((playerId) => awayLineup.includes(playerId))) {
+    throw new ConvexError(
+      "Un même joueur figure dans les deux compositions du match : c'est une erreur de saisie.",
+    );
+  }
+}
+
+/** Réécrit entièrement les compositions d'un match : la feuille est un tout. */
+async function writeLineups(
+  ctx: MutationCtx,
+  match: Doc<"matches">,
+  homeLineup: Id<"players">[],
+  awayLineup: Id<"players">[],
+) {
+  const previous = await ctx.db
+    .query("lineupEntries")
+    .withIndex("by_match", (q) => q.eq("matchId", match._id))
+    .collect();
+  for (const entry of previous) {
+    await ctx.db.delete(entry._id);
+  }
+  for (const [teamId, lineup] of [
+    [match.homeTeamId, homeLineup],
+    [match.awayTeamId, awayLineup],
+  ] as const) {
+    for (const playerId of lineup) {
+      await ctx.db.insert("lineupEntries", {
+        matchId: match._id,
+        matchdayId: match.matchdayId,
+        teamId,
+        playerId,
+      });
     }
   }
 }
@@ -135,6 +219,12 @@ export const submit = mutation({
     const sides = await sidesOf(ctx, match);
     const to = transitionTo("submitSheet", match.state, actorFor(sides, "home"));
 
+    const format = await formatOf(ctx, match);
+    if (format === "plateau") {
+      throw new ConvexError(
+        "Sur un plateau, c'est l'administrateur qui saisit les résultats.",
+      );
+    }
     if (match.slot === undefined) {
       throw new ConvexError("Ce match n'a pas de créneau confirmé.");
     }
@@ -145,17 +235,8 @@ export const submit = mutation({
     }
 
     // Le score est validé avant les compositions : c'est l'erreur la plus fréquente.
-    const result = resultFrom(match, args.sets);
-
-    const licenses = newLicenseCache();
-    await checkLineup(ctx, match.homeTeamId, args.homeLineup, "receveur", match.slot.at, licenses);
-    await checkLineup(ctx, match.awayTeamId, args.awayLineup, "visiteur", match.slot.at, licenses);
-    const both = args.homeLineup.filter((playerId) => args.awayLineup.includes(playerId));
-    if (both.length > 0) {
-      throw new ConvexError(
-        "Un même joueur figure dans les deux compositions du match : c'est une erreur de saisie.",
-      );
-    }
+    const result = resultFrom(match, args.sets, format);
+    await checkLineups(ctx, match, match.slot.at, args.homeLineup, args.awayLineup);
 
     const deadline = sheetTacitDeadline(Date.now());
     const existing = await sheetOf(ctx, args.matchId);
@@ -179,27 +260,7 @@ export const submit = mutation({
       });
     }
 
-    // Les compositions sont réécrites entièrement : la feuille est un tout.
-    const previous = await ctx.db
-      .query("lineupEntries")
-      .withIndex("by_match", (q) => q.eq("matchId", args.matchId))
-      .collect();
-    for (const entry of previous) {
-      await ctx.db.delete(entry._id);
-    }
-    for (const [teamId, lineup] of [
-      [match.homeTeamId, args.homeLineup],
-      [match.awayTeamId, args.awayLineup],
-    ] as const) {
-      for (const playerId of lineup) {
-        await ctx.db.insert("lineupEntries", {
-          matchId: args.matchId,
-          matchdayId: match.matchdayId,
-          teamId,
-          playerId,
-        });
-      }
-    }
+    await writeLineups(ctx, match, args.homeLineup, args.awayLineup);
 
     if (match.tacitJobId !== undefined) {
       await ctx.scheduler.cancel(match.tacitJobId);
@@ -243,7 +304,7 @@ export const validate = mutation({
     await ctx.db.patch(sheet._id, { status: "validated", deadline: undefined });
     await ctx.db.patch(matchId, {
       state: to,
-      result: resultFrom(match, sheet.sets),
+      result: resultFrom(match, sheet.sets, await formatOf(ctx, match)),
       tacitJobId: undefined,
     });
     return null;
@@ -303,7 +364,7 @@ export const applyTacitSheet = internalMutation({
     await ctx.db.patch(sheetId, { status: "validated", deadline: undefined });
     await ctx.db.patch(matchId, {
       state: "completed",
-      result: resultFrom(match, sheet.sets),
+      result: resultFrom(match, sheet.sets, await formatOf(ctx, match)),
       tacitJobId: undefined,
     });
     return null;
@@ -323,7 +384,7 @@ export const settleDispute = mutation({
     if (sheet === null) {
       throw new ConvexError("Aucune feuille de match à arbitrer.");
     }
-    const result = resultFrom(match, sets);
+    const result = resultFrom(match, sets, await formatOf(ctx, match));
     await ctx.db.patch(sheet._id, {
       sets,
       status: "validated",
@@ -340,7 +401,7 @@ export const settleDispute = mutation({
  *
  * Un match forfait est un match **terminé** portant l'équipe défaillante : le classement
  * n'a aucun cas particulier à connaître. Le score conventionnel est matérialisé (3 sets
- * à 25-0), de sorte que les ratios restent comparables entre équipes.
+ * à 25-0, 2 en plateau), de sorte que les ratios restent comparables entre équipes.
  */
 export const forfeit = mutation({
   args: { matchId: v.id("matches"), forfeitingTeamId: v.id("teams") },
@@ -357,10 +418,11 @@ export const forfeit = mutation({
       throw new ConvexError("Cette équipe ne joue pas ce match.");
     }
     const homeForfeits = forfeitingTeamId === match.homeTeamId;
-    const sets = forfeitScore().map((set) =>
+    const format = await formatOf(ctx, match);
+    const sets = forfeitScore(format).map((set) =>
       homeForfeits ? { home: set.away, away: set.home } : set,
     );
-    const result = resultFrom(match, sets);
+    const result = resultFrom(match, sets, format);
 
     if (match.tacitJobId !== undefined) {
       await ctx.scheduler.cancel(match.tacitJobId);
@@ -406,7 +468,7 @@ export const correct = mutation({
     if (sheet === null) {
       throw new ConvexError("Ce match n'a pas de feuille.");
     }
-    const result = resultFrom(match, sets);
+    const result = resultFrom(match, sets, await formatOf(ctx, match));
     await ctx.db.patch(sheet._id, { sets, settledBy: admin._id });
     await ctx.db.patch(matchId, { result, forfeitAgainst: undefined });
     return null;
@@ -414,10 +476,76 @@ export const correct = mutation({
 });
 
 /**
- * Feuille de match d'un match, compositions incluses.
+ * Plateau : l'administrateur saisit lui-même le score et les compositions, et le match est
+ * **terminé** d'emblée — ni validation du visiteur, ni échéance tacite.
  *
- * Nominatif : réservé aux comptes connectés. Les scores publics passent par les queries
- * de calendrier et de résultats.
+ * Les règles de composition sont les mêmes qu'ailleurs : licence à la date du plateau,
+ * joueurs du club, renforts signalés.
+ */
+export const record = mutation({
+  args: {
+    matchId: v.id("matches"),
+    sets: v.array(setScore),
+    homeLineup: v.array(v.id("players")),
+    awayLineup: v.array(v.id("players")),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const admin = await requireAdmin(ctx);
+    const match = await mustGetMatch(ctx, args.matchId);
+    const format = await formatOf(ctx, match);
+    if (format !== "plateau") {
+      throw new ConvexError(
+        "Seuls les matchs de plateau se saisissent ainsi : ailleurs, le receveur transcrit " +
+          "la feuille et le visiteur la valide.",
+      );
+    }
+    const to = transitionTo("recordResult", match.state, "admin");
+    if (match.slot === undefined) {
+      throw new ConvexError("Ce plateau n'a ni date ni salle.");
+    }
+    if (Date.now() < match.slot.at) {
+      throw new ConvexError(
+        "Le plateau n'a pas encore eu lieu : la saisie ouvre à l'heure du plateau.",
+      );
+    }
+
+    const result = resultFrom(match, args.sets, format);
+    await checkLineups(ctx, match, match.slot.at, args.homeLineup, args.awayLineup);
+
+    const existing = await sheetOf(ctx, args.matchId);
+    const sheet = {
+      sets: args.sets,
+      submittedBy: admin._id,
+      status: "validated" as const,
+      settledBy: admin._id,
+      deadline: undefined,
+      disputeReason: undefined,
+    };
+    if (existing === null) {
+      await ctx.db.insert("matchSheets", { matchId: args.matchId, ...sheet });
+    } else {
+      await ctx.db.patch(existing._id, sheet);
+    }
+    await writeLineups(ctx, match, args.homeLineup, args.awayLineup);
+    await ctx.db.patch(args.matchId, { state: to, result, tacitJobId: undefined });
+    return null;
+  },
+});
+
+const lineupPlayer = v.object({
+  _id: v.id("players"),
+  name: v.string(),
+  reinforcement: reinforcementInfo,
+});
+
+/**
+ * Feuille de match d'un match, compositions incluses, avec la situation de chaque joueur
+ * vis-à-vis de sa feuille verte et les **signalements** de renfort.
+ *
+ * Nominatif, et les signalements relèvent du déroulé administratif : réservé aux
+ * responsables des deux équipes et aux administrateurs. Les scores publics passent par
+ * `publicResult`, qui ne renvoie aucun signalement.
  */
 export const get = query({
   args: { matchId: v.id("matches") },
@@ -428,8 +556,9 @@ export const get = query({
       deadline: v.union(v.number(), v.null()),
       disputeReason: v.union(v.string(), v.null()),
       submittedByMe: v.boolean(),
-      homeLineup: v.array(v.object({ _id: v.id("players"), name: v.string() })),
-      awayLineup: v.array(v.object({ _id: v.id("players"), name: v.string() })),
+      homeLineup: v.array(lineupPlayer),
+      awayLineup: v.array(lineupPlayer),
+      quota: v.union(reinforcementQuota, v.null()),
     }),
     v.null(),
   ),
@@ -440,25 +569,36 @@ export const get = query({
     if (sheet === null) {
       return null;
     }
+    const championship = await ctx.db.get(match.championshipId);
     const entries = await ctx.db
       .query("lineupEntries")
       .withIndex("by_match", (q) => q.eq("matchId", matchId))
       .collect();
-    const named = await Promise.all(
-      entries.map(async (entry) => {
-        const player = await ctx.db.get(entry.playerId);
-        return {
-          teamId: entry.teamId,
-          _id: entry.playerId,
-          name: player === null ? "Joueur supprimé" : `${player.firstName} ${player.lastName}`,
-        };
-      }),
-    );
-    const forTeam = (teamId: Id<"teams">) =>
-      named
+    const cache = newChampionshipCache();
+
+    const forTeam = async (teamId: Id<"teams">) => {
+      const playerIds = entries
         .filter((entry) => entry.teamId === teamId)
-        .map(({ _id, name }) => ({ _id, name }))
-        .sort((a, b) => a.name.localeCompare(b.name, "fr"));
+        .map((entry) => entry.playerId);
+      const assessed = await assessTeamLineup(ctx, match, teamId, playerIds, cache);
+      const rows = await Promise.all(
+        playerIds.map(async (playerId) => {
+          const player = await ctx.db.get(playerId);
+          const assessment = assessed.get(playerId);
+          return {
+            _id: playerId,
+            name: player === null ? "Joueur supprimé" : `${player.firstName} ${player.lastName}`,
+            reinforcement: {
+              kind: assessment?.kind ?? ("own" as const),
+              flags: assessment?.flags ?? [],
+              upperMatchNumber: assessment?.upperMatchNumber ?? 0,
+              originTeamName: assessment?.originTeamName ?? null,
+            },
+          };
+        }),
+      );
+      return rows.sort((a, b) => a.name.localeCompare(b.name, "fr"));
+    };
 
     return {
       sets: sheet.sets,
@@ -466,8 +606,115 @@ export const get = query({
       deadline: sheet.deadline ?? null,
       disputeReason: sheet.disputeReason ?? null,
       submittedByMe: sheet.submittedBy === sides.user._id,
-      homeLineup: forTeam(match.homeTeamId),
-      awayLineup: forTeam(match.awayTeamId),
+      homeLineup: await forTeam(match.homeTeamId),
+      awayLineup: await forTeam(match.awayTeamId),
+      quota: championship?.reinforcementQuota ?? null,
+    };
+  },
+});
+
+/**
+ * Les licenciés alignables par une équipe sur un match : **tout son club**, avec pour
+ * chacun la licence à la date du match et de quoi le classer comme renfort.
+ *
+ * L'écran de composition s'en sert pour annoncer les signalements au fil des cases cochées
+ * — le classement final dépend de toute la composition (le quota du mixte), il est donc
+ * recalculé côté client par la même fonction pure que côté serveur. Convex reste seul juge
+ * des rejets, et seul auteur des signalements enregistrés.
+ *
+ * `previousOnMatchday` : la composition de l'équipe sur son dernier match saisi de la même
+ * journée, pour reprendre par défaut celle du plateau.
+ */
+export const lineupCandidates = query({
+  args: { matchId: v.id("matches"), teamId: v.id("teams") },
+  returns: v.object({
+    context: v.object({
+      teamId: v.id("teams"),
+      level: v.number(),
+      quota: v.union(reinforcementQuota, v.null()),
+    }),
+    players: v.array(
+      v.object({
+        _id: v.id("players"),
+        firstName: v.string(),
+        lastName: v.string(),
+        license: licenseStatus,
+        originTeamId: v.union(v.id("teams"), v.null()),
+        originTeamName: v.union(v.string(), v.null()),
+        originLevel: v.union(v.number(), v.null()),
+        upperMatchesBefore: v.number(),
+      }),
+    ),
+    previousOnMatchday: v.array(v.id("players")),
+  }),
+  handler: async (ctx, { matchId, teamId }) => {
+    const match = await mustGetMatch(ctx, matchId);
+    await sidesOf(ctx, match);
+    if (teamId !== match.homeTeamId && teamId !== match.awayTeamId) {
+      throw new ConvexError("Cette équipe ne joue pas ce match.");
+    }
+    const team = await ctx.db.get(teamId);
+    const championship = await ctx.db.get(match.championshipId);
+    if (team === null || championship === null) {
+      throw new ConvexError("Équipe ou championnat inconnu.");
+    }
+
+    const players = await ctx.db
+      .query("players")
+      .withIndex("by_club", (q) => q.eq("clubId", team.clubId))
+      .collect();
+    const at = match.slot?.at ?? Date.now();
+    const licenses = newLicenseCache();
+    const cache = newChampionshipCache();
+    const rows = await Promise.all(
+      players.map(async (player) => {
+        const candidate = await candidateFor(ctx, player._id, championship, match, cache);
+        return {
+          _id: player._id,
+          firstName: player.firstName,
+          lastName: player.lastName,
+          license: await statusAt(ctx, player._id, at, licenses),
+          originTeamId: candidate.originTeamId as Id<"teams"> | null,
+          originTeamName: candidate.originTeamName,
+          originLevel: candidate.originLevel,
+          upperMatchesBefore: candidate.upperMatchesBefore,
+        };
+      }),
+    );
+
+    // Dernière composition de l'équipe sur un autre match de la même journée.
+    const sameDay = await ctx.db
+      .query("lineupEntries")
+      .withIndex("by_matchday", (q) => q.eq("matchdayId", match.matchdayId))
+      .collect();
+    const ofTeam = sameDay.filter(
+      (entry) => entry.teamId === teamId && entry.matchId !== matchId,
+    );
+    const latestMatchId = ofTeam.reduce<Doc<"lineupEntries"> | null>(
+      (latest, entry) =>
+        latest === null || entry._creationTime > latest._creationTime ? entry : latest,
+      null,
+    )?.matchId;
+    const previousOnMatchday = ofTeam
+      .filter((entry) => entry.matchId === latestMatchId)
+      .map((entry) => entry.playerId);
+
+    // Feuille verte d'abord, puis renforts, chacun par ordre alphabétique.
+    rows.sort(
+      (a, b) =>
+        Number(b.originTeamId === teamId) - Number(a.originTeamId === teamId) ||
+        a.lastName.localeCompare(b.lastName, "fr") ||
+        a.firstName.localeCompare(b.firstName, "fr"),
+    );
+
+    return {
+      context: {
+        teamId,
+        level: championship.level,
+        quota: championship.reinforcementQuota ?? null,
+      },
+      players: rows,
+      previousOnMatchday,
     };
   },
 });

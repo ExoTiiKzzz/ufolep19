@@ -4,10 +4,16 @@
  * Module pur : le classement est dérivé des matchs terminés, jamais stocké comme état
  * modifiable à la main.
  *
- * Barème : 3 points pour une victoire 3-0 ou 3-1, 2 pour une victoire 3-2, 1 pour une
- * défaite 2-3, 0 pour une défaite 0-3 ou 1-3. Le vainqueur par forfait marque 3 points,
- * l'équipe défaillante 0.
+ * Barème standard : 3 points pour une victoire 3-0 ou 3-1, 2 pour une victoire 3-2, 1 pour
+ * une défaite 2-3, 0 pour une défaite 0-3 ou 1-3.
+ *
+ * Barème plateau (**provisoire**, ADR-0005) : 3 points pour une victoire 2-0, 2 pour une
+ * victoire 1-1 aux points, 1 pour un match nul ou une défaite 1-1, 0 pour une défaite 0-2.
+ *
+ * Le vainqueur par forfait marque 3 points, l'équipe défaillante 0, dans les deux formats.
  */
+import { winnerOf, type MatchFormat } from "./score";
+
 export type MatchOutcome = {
   homeTeamId: string;
   awayTeamId: string;
@@ -22,6 +28,7 @@ export type StandingRow = {
   rank: number;
   played: number;
   wins: number;
+  draws: number;
   losses: number;
   setsWon: number;
   setsLost: number;
@@ -36,6 +43,39 @@ export function pointsForResult(setsWon: number, setsLost: number): number {
     return setsLost <= 1 ? 3 : 2;
   }
   return setsWon === 2 ? 1 : 0;
+}
+
+/** Ce qu'une équipe a fait dans un match, de son point de vue. */
+export type SideResult = {
+  setsWon: number;
+  setsLost: number;
+  pointsFor: number;
+  pointsAgainst: number;
+};
+
+/** Issue d'un match pour une équipe : aux sets, puis aux points ; nul sinon. */
+export function sideOutcome(side: SideResult): "win" | "draw" | "loss" {
+  const winner = winnerOf(side.setsWon, side.setsLost, side.pointsFor, side.pointsAgainst);
+  return winner === "home" ? "win" : winner === "away" ? "loss" : "draw";
+}
+
+/** Points de classement d'une équipe pour un match plateau. */
+export function plateauPointsForResult(side: SideResult): number {
+  const outcome = sideOutcome(side);
+  if (outcome === "draw") {
+    return 1;
+  }
+  const clean = side.setsWon === 0 || side.setsLost === 0;
+  if (outcome === "win") {
+    return clean ? 3 : 2;
+  }
+  return clean ? 0 : 1;
+}
+
+function rankingPoints(side: SideResult, format: MatchFormat): number {
+  return format === "plateau"
+    ? plateauPointsForResult(side)
+    : pointsForResult(side.setsWon, side.setsLost);
 }
 
 /**
@@ -53,6 +93,7 @@ function compareRatios(aFor: number, aAgainst: number, bFor: number, bAgainst: n
 export function computeStandings(
   teamIds: string[],
   outcomes: MatchOutcome[],
+  format: MatchFormat = "standard",
 ): StandingRow[] {
   const rows = new Map<string, StandingRow>();
   for (const teamId of teamIds) {
@@ -61,6 +102,7 @@ export function computeStandings(
       rank: 0,
       played: 0,
       wins: 0,
+      draws: 0,
       losses: 0,
       setsWon: 0,
       setsLost: 0,
@@ -93,8 +135,11 @@ export function computeStandings(
         continue;
       }
       row.played++;
-      if (side.setsWon > side.setsLost) {
+      const result = sideOutcome(side);
+      if (result === "win") {
         row.wins++;
+      } else if (result === "draw") {
+        row.draws++;
       } else {
         row.losses++;
       }
@@ -102,7 +147,7 @@ export function computeStandings(
       row.setsLost += side.setsLost;
       row.pointsFor += side.pointsFor;
       row.pointsAgainst += side.pointsAgainst;
-      row.points += pointsForResult(side.setsWon, side.setsLost);
+      row.points += rankingPoints(side, format);
     }
   }
 

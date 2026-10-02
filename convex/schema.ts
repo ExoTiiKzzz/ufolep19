@@ -24,9 +24,25 @@ export const slot = v.object({
   venue: v.string(),
 });
 
+/**
+ * Format d'un championnat : règles de score et de classement. Indépendant du circuit.
+ * `standard` : meilleur des 5 sets. `plateau` : 2 sets secs, match nul possible.
+ */
+export const matchFormat = v.union(v.literal("standard"), v.literal("plateau"));
+
+/**
+ * Quota d'un championnat qui admet des renforts venus de niveaux plus forts (le mixte) :
+ * au plus `maxPlayers`, et seulement pour compléter la composition à `completeTo`.
+ */
+export const reinforcementQuota = v.object({
+  maxPlayers: v.number(),
+  completeTo: v.number(),
+});
+
 /** Résultat d'un match terminé, agrégé une fois pour toutes à la clôture. */
 export const matchResult = v.object({
-  winnerTeamId: v.id("teams"),
+  // Absent pour un match nul — possible en plateau seulement (ADR-0005).
+  winnerTeamId: v.optional(v.id("teams")),
   homeSets: v.number(),
   awaySets: v.number(),
   homePoints: v.number(),
@@ -108,11 +124,27 @@ export default defineSchema({
     .index("by_player", ["playerId"])
     .index("by_number", ["number"]),
 
-  // Championnat : compétition d'une saison, regroupant N équipes engagées.
-  championships: defineTable({
+  // Circuit : groupe de championnats d'une saison à l'intérieur duquel un joueur ne figure
+  // que sur une seule feuille verte. Le circuit principal regroupe D1, D2, D3 et le mixte ;
+  // la coupe et le féminin ont chacun le leur.
+  circuits: defineTable({
     seasonId: v.id("seasons"),
     name: v.string(),
   }).index("by_season", ["seasonId"]),
+
+  // Championnat : compétition d'une saison, regroupant N équipes engagées. Trois réglages
+  // indépendants : son circuit (unicité de la feuille verte), son niveau (sens des
+  // renforts, 1 = le plus fort) et son format (règles de score et de classement).
+  championships: defineTable({
+    seasonId: v.id("seasons"),
+    circuitId: v.id("circuits"),
+    name: v.string(),
+    level: v.number(),
+    format: matchFormat,
+    reinforcementQuota: v.optional(reinforcementQuota),
+  })
+    .index("by_season", ["seasonId"])
+    .index("by_circuit", ["circuitId"]),
 
   // Équipe : appartient à un club et à UNE SEULE saison, engagée dans un championnat.
   // `seasonId` est dérivé du championnat à la création, jamais fourni par l'appelant.
@@ -126,7 +158,9 @@ export default defineSchema({
     .index("by_season", ["seasonId"])
     .index("by_club_and_season", ["clubId", "seasonId"]),
 
-  // Effectif : appartenance d'un joueur à une équipe pour la saison.
+  // Effectif — « feuille verte » dans l'UI : appartenance d'un joueur à une équipe pour la
+  // saison. Un joueur figure sur au plus une feuille verte par circuit ; il fixe son niveau
+  // d'origine, et aligné ailleurs dans le circuit, il est un renfort.
   rosterEntries: defineTable({
     teamId: v.id("teams"),
     playerId: v.id("players"),
@@ -151,6 +185,9 @@ export default defineSchema({
     number: v.number(),
     windowStart: v.number(),
     windowEnd: v.number(),
+    // Plateau : date, heure et salle fixées par l'administrateur, communes à tous les
+    // matchs de la journée. Présent si et seulement si le championnat est au format plateau.
+    plateau: v.optional(slot),
   })
     .index("by_championship", ["championshipId"])
     .index("by_championship_and_number", ["championshipId", "number"]),
@@ -235,5 +272,7 @@ export default defineSchema({
     .index("by_match", ["matchId"])
     .index("by_match_and_team", ["matchId", "teamId"])
     .index("by_matchday", ["matchdayId"])
+    // Sert aussi, par préfixe, à retrouver tous les matchs d'un joueur : le compteur des
+    // matchs joués au-dessus de son niveau.
     .index("by_player_and_matchday", ["playerId", "matchdayId"]),
 });

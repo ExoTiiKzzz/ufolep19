@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "convex/react";
 import Link from "next/link";
 import { useState } from "react";
 
+import { ChampionshipSettingsForm } from "@/components/championship-settings-form";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { api } from "@/convex/_generated/api";
 import { errorMessage } from "@/lib/errors";
 import { formatDateTime } from "@/lib/format";
-import { stalledReasonLabels } from "@/lib/labels";
+import { formatLabels, levelLabel, stalledReasonLabels } from "@/lib/labels";
 
 export default function AdminPage() {
   const account = useQuery(api.users.me);
@@ -22,10 +23,15 @@ export default function AdminPage() {
     api.championships.listBySeason,
     season ? { seasonId: season._id } : "skip",
   );
+  const circuits = useQuery(
+    api.circuits.listBySeason,
+    season ? { seasonId: season._id } : "skip",
+  );
   const progress = useQuery(api.adminViews.progress, isAdmin ? {} : "skip");
   const overdue = useQuery(api.adminViews.overdueSlots, isAdmin ? {} : "skip");
   const stalled = useQuery(api.adminViews.stalled, isAdmin ? {} : "skip");
   const createChampionship = useMutation(api.championships.create);
+  const createCircuit = useMutation(api.circuits.create);
   const [error, setError] = useState<string | null>(null);
 
   if (account === undefined) {
@@ -82,33 +88,59 @@ export default function AdminPage() {
             </p>
           ) : (
             <>
-              <div className="flex flex-col gap-2">
-                {(championships ?? []).length === 0 ? (
-                  <p className="text-muted-foreground text-sm">Aucun championnat.</p>
-                ) : (
-                  (championships ?? []).map((championship) => {
-                    const stats = (progress ?? []).find(
-                      (row) => row.championshipId === championship._id,
-                    );
-                    return (
-                      <Link
-                        key={championship._id}
-                        href={`/administration/championnats/${championship._id}`}
-                        className="hover:bg-muted/50 flex flex-wrap items-center gap-3 rounded-md px-2 py-2 text-sm"
-                      >
-                        <span className="font-medium">{championship.name}</span>
-                        {stats === undefined ? null : (
-                          <span className="text-muted-foreground">
-                            {stats.completed}/{stats.total} matchs terminés · {stats.negotiating} en
-                            négociation · {stats.confirmed} à jouer
-                            {stats.disputed > 0 ? ` · ${stats.disputed} litige(s)` : ""}
-                          </span>
-                        )}
-                      </Link>
-                    );
-                  })
-                )}
-              </div>
+              {(championships ?? []).length === 0 ? (
+                <p className="text-muted-foreground text-sm">Aucun championnat.</p>
+              ) : null}
+              {(circuits ?? []).map((circuit) => {
+                const inCircuit = (championships ?? [])
+                  .filter((championship) => championship.circuitId === circuit._id)
+                  .sort((a, b) => a.level - b.level || a.name.localeCompare(b.name, "fr"));
+                return (
+                  <div key={circuit._id} className="flex flex-col gap-1">
+                    <p className="text-sm font-medium">
+                      Circuit {circuit.name}
+                      <span className="text-muted-foreground font-normal">
+                        {" "}
+                        · une feuille verte par licencié
+                      </span>
+                    </p>
+                    {inCircuit.length === 0 ? (
+                      <p className="text-muted-foreground px-2 text-sm">Aucun championnat.</p>
+                    ) : null}
+                    {inCircuit.map((championship) => {
+                      const stats = (progress ?? []).find(
+                        (row) => row.championshipId === championship._id,
+                      );
+                      return (
+                        <Link
+                          key={championship._id}
+                          href={`/administration/championnats/${championship._id}`}
+                          className="hover:bg-muted/50 flex flex-wrap items-center gap-3 rounded-md px-2 py-2 text-sm"
+                        >
+                          <span className="font-medium">{championship.name}</span>
+                          <Badge variant="muted">{levelLabel(championship.level)}</Badge>
+                          {championship.format === "plateau" ? (
+                            <Badge variant="muted">{formatLabels.plateau}</Badge>
+                          ) : null}
+                          {championship.reinforcementQuota === undefined ? null : (
+                            <Badge variant="muted">
+                              renforts : {championship.reinforcementQuota.maxPlayers} pour
+                              compléter à {championship.reinforcementQuota.completeTo}
+                            </Badge>
+                          )}
+                          {stats === undefined ? null : (
+                            <span className="text-muted-foreground">
+                              {stats.completed}/{stats.total} matchs terminés ·{" "}
+                              {stats.negotiating} en négociation · {stats.confirmed} à jouer
+                              {stats.disputed > 0 ? ` · ${stats.disputed} litige(s)` : ""}
+                            </span>
+                          )}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                );
+              })}
 
               <form
                 className="flex flex-wrap items-end gap-3 border-t pt-4"
@@ -118,9 +150,9 @@ export default function AdminPage() {
                   const element = event.currentTarget;
                   setError(null);
                   try {
-                    await createChampionship({
+                    await createCircuit({
                       seasonId: season._id,
-                      name: String(form.get("name")),
+                      name: String(form.get("circuit")),
                     });
                     element.reset();
                   } catch (caught) {
@@ -129,17 +161,43 @@ export default function AdminPage() {
                 }}
               >
                 <div className="min-w-56 flex-1">
-                  <Label htmlFor="championship">Nouveau championnat</Label>
+                  <Label htmlFor="circuit">Nouveau circuit</Label>
                   <Input
-                    id="championship"
-                    name="name"
+                    id="circuit"
+                    name="circuit"
                     className="mt-2"
                     required
-                    placeholder="Départemental mixte"
+                    placeholder="Championnat, Coupe de Corrèze, Féminin…"
                   />
                 </div>
-                <Button type="submit">Créer</Button>
+                <Button type="submit" variant="outline">
+                  Créer le circuit
+                </Button>
               </form>
+
+              <div className="border-t pt-4">
+                <p className="mb-3 text-sm font-medium">Nouveau championnat</p>
+                {(circuits ?? []).length === 0 ? (
+                  <p className="text-muted-foreground text-sm">
+                    Créez d&apos;abord un circuit : chaque championnat en désigne un.
+                  </p>
+                ) : (
+                  <ChampionshipSettingsForm
+                    circuits={circuits ?? []}
+                    submitLabel="Créer le championnat"
+                    idPrefix="new-"
+                    onSubmit={async (settings, element) => {
+                      setError(null);
+                      try {
+                        await createChampionship({ seasonId: season._id, ...settings });
+                        element.reset();
+                      } catch (caught) {
+                        setError(errorMessage(caught, "Action impossible."));
+                      }
+                    }}
+                  />
+                )}
+              </div>
             </>
           )}
         </CardContent>

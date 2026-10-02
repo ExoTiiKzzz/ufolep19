@@ -66,36 +66,96 @@ permis, mais ne fait jamais autorité.
 
 ## Jeu de données de développement
 
+> **Base à réinitialiser.** Depuis l'introduction des circuits, un championnat porte
+> obligatoirement un circuit, un niveau et un format : un déploiement qui contient des
+> championnats de l'ancien modèle refusera le nouveau schéma au `convex dev` / `convex deploy`.
+> Videz ses tables (dashboard Convex) avant de pousser, puis rejouez le seed ou l'import.
+
 ```bash
 npm run seed:dev
 ```
 
-Écrit de quoi parcourir le cycle de vie d'un match à deux comptes, sur le déploiement pointé par
-`CONVEX_DEPLOYMENT`. **À ne lancer qu'en développement** : le mot de passe des comptes est en clair
-dans la sortie de la commande.
+Écrit une **saison entière en cours de route**, sur le déploiement pointé par
+`CONVEX_DEPLOYMENT` : 5 clubs, deux circuits, 9 équipes, 66 licenciés, 12 journées et 36 matchs,
+dont 15 déjà joués — le classement est donc rempli dès l'ouverture de la page d'accueil.
 
-| Compte | Rôle | Équipe |
+- **Circuit Championnat** : le championnat départemental (D1, format standard), 6 équipes, 10
+  journées, 30 matchs dont 12 joués.
+- **Circuit Féminin** : un championnat au format **plateau**, 3 équipes (Tulle F, Brive F,
+  Ussel F) avec leurs propres feuilles vertes. Un plateau passé, résultats saisis par
+  l'administrateur — un 2-0, un **match nul** et une victoire 1-1 aux points —, et un plateau à
+  venir.
+**À ne lancer qu'en développement** : le mot de passe des comptes est en clair dans la sortie de
+la commande.
+
+| Compte | Rôle | Équipes |
 | --- | --- | --- |
 | `admin@dev.ufolep19.test` | `admin` | — |
-| `tulle@dev.ufolep19.test` | `manager` | Tulle 1 |
-| `brive@dev.ufolep19.test` | `manager` | Brive 1 |
+| `tulle@dev.ufolep19.test` | `manager` | Tulle 1, Tulle 2, Tulle F |
+| `brive@dev.ufolep19.test` | `manager` | Brive 1, Brive F |
+| `ussel@dev.ufolep19.test` | `manager` | Ussel 1, Ussel F |
+| `argentat@dev.ufolep19.test` | `manager` | Argentat 1 |
+| `objat@dev.ufolep19.test` | `manager` | Objat 1 |
 
 Mot de passe commun `ufolep19dev`, remplaçable :
 `npx convex run seed:dev '{"password":"..."}'`.
 
-Les deux équipes s'affrontent deux fois, dans un championnat de la saison courante, avec huit
-licenciés chacune à l'effectif :
+**Un responsable par club, donc un compte en face de chaque équipe** : toute négociation se joue
+entre deux comptes distincts. Tulle en engage deux, ce qui couvre le cas du responsable
+multi-équipes. Le calendrier est un aller-retour en ronde à l'italienne : chaque équipe joue une
+fois par journée, et le duel Tulle 1 – Brive 1 est placé de sorte que l'aller porte la feuille à
+saisir et le retour le créneau à proposer.
 
-- **Journée 1**, fenêtre fermée — Tulle reçoit, le créneau est passé : le responsable de Tulle doit
-  **saisir la feuille de match**, celui de Brive la validera.
-- **Journée 2**, fenêtre ouverte aujourd'hui — Brive reçoit, aucun créneau : le responsable de
-  Brive doit **proposer un créneau**, celui de Tulle l'acceptera ou le refusera.
+Les six états du cycle de vie sont représentés, plus le forfait :
+
+| Où | État | Qui a la main |
+| --- | --- | --- |
+| J1–J4 | **terminés** (12 matchs, dont un **forfait**) | — |
+| J5, fenêtre fermée | **confirmé**, créneau passé | Tulle saisit la feuille |
+| J5 | **feuille à valider** | Ussel valide ou conteste |
+| J5 | **litige** | l'administrateur arbitre |
+| J6, fenêtre ouverte | **créneau proposé** | Objat accepte ou refuse |
+| J6 à J10 | **planifiés** | le receveur propose |
+
+Le dernier licencié de Tulle 1 et de Brive 1 porte une licence **close avant le match de J5** : le
+cas « licence périmée, joueur non alignable » est dans le jeu, sans avoir à trafiquer la base. Les
+compositions des matchs déjà joués n'utilisent que les premiers de chaque effectif, pour qu'aucune
+feuille passée ne s'appuie sur une licence expirée.
 
 La commande est **rejouable** : chaque exécution supprime d'abord le jeu précédent. Pour que cette
 purge ne morde pas sur des données saisies à la main, tout ce qu'elle crée est marqué — saisons et
 clubs suffixés `(dev)`, comptes sur le domaine réservé `dev.ufolep19.test`, licences préfixées
 `DEV-`. Rien d'autre n'est touché, à une exception assumée : la saison du jeu devient la **saison
 courante**, ce qui démet celle qui l'était.
+
+### Retirer le jeu
+
+```bash
+npx convex run seed:purge          # ajouter --prod pour la production
+```
+
+Supprime le jeu sans le recréer, avec la même délimitation par marqueurs. **Elle ne restaure pas
+la saison courante précédente** : si le jeu en avait démis une, il faut la redésigner depuis
+l'écran d'administration des saisons.
+
+### Sur la production
+
+Le jeu peut être posé sur la production pour faire manipuler la plateforme avant le lancement :
+
+```bash
+npx convex deploy                                        # pousse schéma + fonctions en prod
+npx convex run --prod seed:dev '{"password":"..."}'
+```
+
+Trois précautions, dans cet ordre d'importance :
+
+1. **Toujours passer un mot de passe**, jamais le défaut. `ufolep19dev` est écrit dans ce dépôt :
+   laissé en production, il ouvre un compte **administrateur** à qui sait lire le README.
+2. La saison du jeu devient la saison courante, donc la page d'accueil. C'est voulu tant que la
+   vraie saison n'existe pas ; à corriger le jour où elle est créée.
+3. Les comptes sont sur `dev.ufolep19.test`, un domaine réservé par la RFC 2606 : **aucun e-mail
+   ne leur parviendra jamais**. C'est volontaire — un jeu de démonstration n'a pas à écrire à de
+   vraies adresses — mais il faut transmettre les identifiants de la main à la main.
 
 ## Migration des licences
 

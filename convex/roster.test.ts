@@ -3,7 +3,14 @@ import { expect, test } from "vitest";
 
 import { api } from "./_generated/api";
 import schema from "./schema";
-import { modules, seedAccount, seedRoster, setupChampionship, testLicense } from "./test.setup";
+import {
+  insertChampionship,
+  modules,
+  seedAccount,
+  seedRoster,
+  setupChampionship,
+  testLicense,
+} from "./test.setup";
 
 test("un responsable constitue l'effectif de son équipe", async () => {
   const t = convexTest(schema, modules);
@@ -108,7 +115,7 @@ test("la reprise d'effectif rejouée deux fois n'introduit aucun doublon", async
   // Une saison antérieure, avec la même équipe (même club, même nom) et son effectif.
   const previous = await t.run(async (ctx) => {
     const seasonId = await ctx.db.insert("seasons", { label: "2025-2026", isCurrent: false });
-    const championshipId = await ctx.db.insert("championships", {
+    const championshipId = await insertChampionship(ctx, {
       seasonId,
       name: "Départemental mixte",
     });
@@ -132,13 +139,13 @@ test("la reprise d'effectif rejouée deux fois n'introduit aucun doublon", async
       teamId: s.homeTeamId,
       sourceTeamId: previous,
     }),
-  ).toBe(6);
+  ).toEqual({ added: 6, skipped: [] });
   expect(
     await asHome.mutation(api.roster.copyFrom, {
       teamId: s.homeTeamId,
       sourceTeamId: previous,
     }),
-  ).toBe(0);
+  ).toEqual({ added: 0, skipped: [] });
   expect(await asHome.query(api.roster.listByTeam, { teamId: s.homeTeamId })).toHaveLength(6);
 });
 
@@ -163,20 +170,32 @@ test("un numéro de licence déjà enregistré est refusé", async () => {
   ).rejects.toThrow(/déjà enregistré/i);
 });
 
-test("un joueur peut appartenir à deux équipes de son club", async () => {
-  const t = convexTest(schema, modules);
-  const s = await setupChampionship(t);
-  const secondTeam = await t.run(async (ctx) =>
+/** Une seconde équipe du club receveur, gérée par le même responsable. */
+async function secondHomeTeam(
+  t: ReturnType<typeof convexTest>,
+  s: Awaited<ReturnType<typeof setupChampionship>>,
+  championshipId = s.championshipId,
+) {
+  const teamId = await t.run(async (ctx) =>
     ctx.db.insert("teams", {
       clubId: s.homeClubId,
       seasonId: s.seasonId,
-      championshipId: s.championshipId,
+      championshipId,
       name: "Club A 2",
     }),
   );
-  await t.run(async (ctx) =>
-    ctx.db.insert("teamManagers", { teamId: secondTeam, userId: s.homeManager }),
+  await t.run(async (ctx) => ctx.db.insert("teamManagers", { teamId, userId: s.homeManager }));
+  return teamId;
+}
+
+test("un licencié n'a qu'une feuille verte par circuit", async () => {
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+  // D2 du même circuit que le championnat semé.
+  const d2 = await t.run(async (ctx) =>
+    insertChampionship(ctx, { seasonId: s.seasonId, name: "D2", level: 2 }),
   );
+  const secondTeam = await secondHomeTeam(t, s, d2);
   const asHome = t.withIdentity({ subject: s.homeManager });
   const playerId = await asHome.action(api.players.create, {
     clubId: s.homeClubId,
@@ -186,10 +205,108 @@ test("un joueur peut appartenir à deux équipes de son club", async () => {
   }).then((result) => result.playerId);
 
   await asHome.mutation(api.roster.add, { teamId: s.homeTeamId, playerId });
-  await asHome.mutation(api.roster.add, { teamId: secondTeam, playerId });
+  await expect(asHome.mutation(api.roster.add, { teamId: secondTeam, playerId })).rejects.toThrow(
+    /déjà sur la feuille verte de Club A 1/i,
+  );
+  // Rejouer l'inscription sur sa propre équipe n'est pas un doublon.
+  await asHome.mutation(api.roster.add, { teamId: s.homeTeamId, playerId });
 
-  expect(await asHome.query(api.roster.listByTeam, { teamId: s.homeTeamId })).toHaveLength(1);
+  // Retiré de la première, il peut rejoindre la seconde.
+  await asHome.mutation(api.roster.remove, { teamId: s.homeTeamId, playerId });
+  await asHome.mutation(api.roster.add, { teamId: secondTeam, playerId });
   expect(await asHome.query(api.roster.listByTeam, { teamId: secondTeam })).toHaveLength(1);
+});
+
+test("la coupe a ses propres feuilles vertes : un autre circuit, une autre inscription", async () => {
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+  const cup = await t.run(async (ctx) => {
+    const circuitId = await ctx.db.insert("circuits", { seasonId: s.seasonId, name: "Coupe" });
+    return insertChampionship(ctx, { seasonId: s.seasonId, circuitId, name: "Coupe de Corrèze" });
+  });
+  const cupTeam = await secondHomeTeam(t, s, cup);
+  const asHome = t.withIdentity({ subject: s.homeManager });
+  const playerId = await asHome.action(api.players.create, {
+    clubId: s.homeClubId,
+    firstName: "Camille",
+    lastName: "Durand",
+    license: testLicense("L0001"),
+  }).then((result) => result.playerId);
+
+  await asHome.mutation(api.roster.add, { teamId: s.homeTeamId, playerId });
+  await asHome.mutation(api.roster.add, { teamId: cupTeam, playerId });
+
+  const candidates = await asHome.query(api.roster.candidates, { teamId: cupTeam });
+  expect(candidates).toEqual([
+    expect.objectContaining({ _id: playerId, onThisTeam: true, otherTeamName: null }),
+  ]);
+});
+
+test("les licenciés inscriptibles signalent l'autre feuille verte du circuit", async () => {
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+  const secondTeam = await secondHomeTeam(t, s);
+  const [playerId] = await seedRoster(t, { teamId: s.homeTeamId, clubId: s.homeClubId, count: 1 });
+  const asHome = t.withIdentity({ subject: s.homeManager });
+
+  const candidates = await asHome.query(api.roster.candidates, { teamId: secondTeam });
+  expect(candidates).toEqual([
+    expect.objectContaining({ _id: playerId, onThisTeam: false, otherTeamName: "Club A 1" }),
+  ]);
+  // La recherche couvre les numéros de licence.
+  expect(candidates[0].licenseNumbers).toHaveLength(1);
+});
+
+test("la reprise de feuille verte laisse de côté qui est déjà inscrit ailleurs", async () => {
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t, { label: "2026-2027" });
+  const previous = await t.run(async (ctx) => {
+    const seasonId = await ctx.db.insert("seasons", { label: "2025-2026", isCurrent: false });
+    const championshipId = await insertChampionship(ctx, { seasonId, name: "Départemental" });
+    return await ctx.db.insert("teams", {
+      clubId: s.homeClubId,
+      seasonId,
+      championshipId,
+      name: "Club A 1",
+    });
+  });
+  const players = await seedRoster(t, { teamId: previous, clubId: s.homeClubId, count: 3 });
+  const secondTeam = await secondHomeTeam(t, s);
+  await t.run(async (ctx) =>
+    ctx.db.insert("rosterEntries", { teamId: secondTeam, playerId: players[0] }),
+  );
+
+  const asHome = t.withIdentity({ subject: s.homeManager });
+  expect(
+    await asHome.mutation(api.roster.copyFrom, { teamId: s.homeTeamId, sourceTeamId: previous }),
+  ).toEqual({ added: 2, skipped: ["Joueuse1 Nom1"] });
+});
+
+test("un championnat ne change pas de circuit au prix de l'unicité", async () => {
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+  const cupCircuit = await t.run(async (ctx) =>
+    ctx.db.insert("circuits", { seasonId: s.seasonId, name: "Coupe" }),
+  );
+  const cup = await t.run(async (ctx) =>
+    insertChampionship(ctx, { seasonId: s.seasonId, circuitId: cupCircuit, name: "Coupe" }),
+  );
+  const cupTeam = await secondHomeTeam(t, s, cup);
+  const [playerId] = await seedRoster(t, { teamId: s.homeTeamId, clubId: s.homeClubId, count: 1 });
+  await t.run(async (ctx) => ctx.db.insert("rosterEntries", { teamId: cupTeam, playerId }));
+
+  const admin = t.withIdentity({ subject: s.admin });
+  await expect(
+    admin.mutation(api.championships.update, {
+      championshipId: cup,
+      name: "Coupe",
+      circuitId: (await t.query(api.championships.get, { championshipId: s.championshipId }))!
+        .circuitId,
+      level: 1,
+      format: "standard",
+      reinforcementQuota: null,
+    }),
+  ).rejects.toThrow(/déjà sur la feuille verte/i);
 });
 
 test("un joueur sans compte n'apparaît pas dans la liste des comptes", async () => {

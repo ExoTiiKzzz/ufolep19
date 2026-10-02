@@ -3,6 +3,7 @@ import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { requireAdmin } from "./authz";
 import { matchSummary, newTeamCache, summarize } from "./matches";
+import { slot } from "./schema";
 
 const matchday = v.object({
   _id: v.id("matchdays"),
@@ -11,7 +12,27 @@ const matchday = v.object({
   number: v.number(),
   windowStart: v.number(),
   windowEnd: v.number(),
+  plateau: v.optional(slot),
 });
+
+/**
+ * Contrôle la date et la salle d'un plateau : l'instant doit tomber dans la fenêtre — le
+ * jour du plateau — et la salle est obligatoire.
+ */
+function checkPlateau(
+  plateau: { at: number; venue: string },
+  windowStart: number,
+  windowEnd: number,
+) {
+  if (plateau.at < windowStart || plateau.at > windowEnd) {
+    throw new ConvexError("L'heure du plateau doit tomber dans sa journée.");
+  }
+  const venue = plateau.venue.trim();
+  if (venue === "") {
+    throw new ConvexError("La salle du plateau est obligatoire.");
+  }
+  return { at: plateau.at, venue };
+}
 
 /** Journées d'un championnat, par numéro croissant. Lecture publique. */
 export const listByChampionship = query({
@@ -29,6 +50,10 @@ export const listByChampionship = query({
 /**
  * Crée une journée bornée par une fenêtre de dates. La fenêtre fait office de date butoir
  * de négociation : le créneau d'un match doit tomber à l'intérieur.
+ *
+ * Dans un championnat au format **plateau**, la journée est un plateau : elle porte en
+ * plus la date, l'heure et la salle communes à tous ses matchs, et sa fenêtre est le jour
+ * du plateau.
  */
 export const create = mutation({
   args: {
@@ -36,12 +61,22 @@ export const create = mutation({
     number: v.number(),
     windowStart: v.number(),
     windowEnd: v.number(),
+    plateau: v.optional(slot),
   },
   returns: v.id("matchdays"),
   handler: async (ctx, args) => {
     await requireAdmin(ctx);
-    if ((await ctx.db.get(args.championshipId)) === null) {
+    const championship = await ctx.db.get(args.championshipId);
+    if (championship === null) {
       throw new ConvexError("Championnat inconnu.");
+    }
+    if (championship.format === "plateau" && args.plateau === undefined) {
+      throw new ConvexError("Une journée de plateau porte une date, une heure et une salle.");
+    }
+    if (championship.format !== "plateau" && args.plateau !== undefined) {
+      throw new ConvexError(
+        "Seul un championnat au format plateau fixe la date et la salle de ses journées.",
+      );
     }
     if (!Number.isInteger(args.number) || args.number < 1) {
       throw new ConvexError("Le numéro de journée doit être un entier positif.");
@@ -58,7 +93,49 @@ export const create = mutation({
     if (existing !== null) {
       throw new ConvexError(`La journée ${args.number} existe déjà dans ce championnat.`);
     }
-    return await ctx.db.insert("matchdays", args);
+    return await ctx.db.insert("matchdays", {
+      ...args,
+      plateau:
+        args.plateau === undefined
+          ? undefined
+          : checkPlateau(args.plateau, args.windowStart, args.windowEnd),
+    });
+  },
+});
+
+/**
+ * Déplace un plateau : nouvelle date, heure ou salle, reportées sur tous ses matchs qui
+ * ne sont pas encore joués. C'est le seul « report » d'un plateau.
+ */
+export const updatePlateau = mutation({
+  args: {
+    matchdayId: v.id("matchdays"),
+    windowStart: v.number(),
+    windowEnd: v.number(),
+    plateau: slot,
+  },
+  returns: v.null(),
+  handler: async (ctx, { matchdayId, windowStart, windowEnd, plateau }) => {
+    await requireAdmin(ctx);
+    const matchday = await ctx.db.get(matchdayId);
+    if (matchday === null || matchday.plateau === undefined) {
+      throw new ConvexError("Plateau inconnu.");
+    }
+    if (windowEnd < windowStart) {
+      throw new ConvexError("La fin de fenêtre ne peut pas précéder son début.");
+    }
+    const checked = checkPlateau(plateau, windowStart, windowEnd);
+    await ctx.db.patch(matchdayId, { windowStart, windowEnd, plateau: checked });
+    const matches = await ctx.db
+      .query("matches")
+      .withIndex("by_matchday", (q) => q.eq("matchdayId", matchdayId))
+      .collect();
+    for (const match of matches) {
+      if (match.state === "confirmed") {
+        await ctx.db.patch(match._id, { slot: checked });
+      }
+    }
+    return null;
   },
 });
 
@@ -72,8 +149,12 @@ export const updateWindow = mutation({
   returns: v.null(),
   handler: async (ctx, { matchdayId, windowStart, windowEnd }) => {
     await requireAdmin(ctx);
-    if ((await ctx.db.get(matchdayId)) === null) {
+    const matchday = await ctx.db.get(matchdayId);
+    if (matchday === null) {
       throw new ConvexError("Journée inconnue.");
+    }
+    if (matchday.plateau !== undefined) {
+      throw new ConvexError("Un plateau se déplace avec sa date et sa salle.");
     }
     if (windowEnd < windowStart) {
       throw new ConvexError("La fin de fenêtre ne peut pas précéder son début.");
@@ -102,6 +183,7 @@ export const currentOrNext = query({
       number: v.number(),
       windowStart: v.number(),
       windowEnd: v.number(),
+      plateau: v.optional(slot),
       status: v.union(v.literal("current"), v.literal("upcoming"), v.literal("past")),
       matches: v.array(matchSummary),
     }),
@@ -140,6 +222,7 @@ export const currentOrNext = query({
       number: chosen.number,
       windowStart: chosen.windowStart,
       windowEnd: chosen.windowEnd,
+      plateau: chosen.plateau,
       status: status as "current" | "upcoming" | "past",
       matches: summaries.sort((a, b) => (a.slot?.at ?? 0) - (b.slot?.at ?? 0)),
     };

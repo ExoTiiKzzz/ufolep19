@@ -63,3 +63,13 @@ export const matchdayStatusLabels = {
   upcoming: "Prochaine journée",
   past: "Dernière journée",
 } as const;
+
+export const formatLabels = {
+  standard: "Standard — 3 sets gagnants",
+  plateau: "Plateau — 2 sets secs",
+} as const;
+
+/** « D1 », « D2 » : le niveau tel que les clubs le disent. */
+export function levelLabel(level: number): string {
+  return `D${level}`;
+}

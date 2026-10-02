@@ -1,11 +1,13 @@
 "use client";
 
 import { useMutation, useQuery } from "convex/react";
+import type { FunctionReturnType } from "convex/server";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 
 import { ClubLogo } from "@/components/club-logo";
+import { LineupPicker } from "@/components/lineup-picker";
 import {
   collectSets,
   emptySetInputs,
@@ -25,8 +27,8 @@ import type { Id } from "@/convex/_generated/dataModel";
 import { errorMessage } from "@/lib/errors";
 import {
   formatCountdown,
-  formatDate,
   formatDateTime,
+  formatPlateau,
   formatSets,
   formatWindow,
   inputValueFromTimestamp,
@@ -38,6 +40,8 @@ import {
   postponementStatusLabels,
   proposalStatusLabels,
 } from "@/lib/labels";
+import { flagMessage, kindLabel, UPPER_LEVEL_MATCH_LIMIT } from "@/lib/rules/reinforcement";
+import { forfeitScore, type MatchFormat } from "@/lib/rules/score";
 
 export default function MatchPage() {
   const matchId = useParams<{ id: string }>().id as Id<"matches">;
@@ -48,15 +52,25 @@ export default function MatchPage() {
   const sheet = useQuery(api.sheets.get, account ? { matchId } : "skip");
   // Feuille d'un match terminé : score par set et compositions, lisibles sans compte.
   const publicSheet = useQuery(api.sheets.publicResult, { matchId });
-  // La validité des licences est jugée à la date du match, pas à celle de la saisie.
-  const rosterAt = match?.slot?.at;
-  const homeRoster = useQuery(
-    api.roster.listByTeam,
-    account && match ? { teamId: match.homeTeamId, at: rosterAt } : "skip",
+  const championship = useQuery(
+    api.championships.get,
+    match ? { championshipId: match.championshipId } : "skip",
   );
-  const awayRoster = useQuery(
-    api.roster.listByTeam,
-    account && match ? { teamId: match.awayTeamId, at: rosterAt } : "skip",
+  const format: MatchFormat = championship?.format ?? "standard";
+  const isPlateau = format === "plateau";
+  // Les licenciés alignables ne sont lus qu'au moment de transcrire la feuille, et par qui
+  // en a la main : tout le club, licences jugées à la date du match.
+  const entering =
+    match?.state === "confirmed" &&
+    history !== undefined &&
+    (isPlateau ? history.iAmAdmin : history.iAmHome || history.iAmAdmin);
+  const homeCandidates = useQuery(
+    api.sheets.lineupCandidates,
+    entering && match ? { matchId, teamId: match.homeTeamId } : "skip",
+  );
+  const awayCandidates = useQuery(
+    api.sheets.lineupCandidates,
+    entering && match ? { matchId, teamId: match.awayTeamId } : "skip",
   );
 
   const proposeSlot = useMutation(api.negotiation.proposeSlot);
@@ -70,6 +84,7 @@ export default function MatchPage() {
   const disputeSheet = useMutation(api.sheets.dispute);
   const settleDispute = useMutation(api.sheets.settleDispute);
   const forfeit = useMutation(api.sheets.forfeit);
+  const recordResult = useMutation(api.sheets.record);
 
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -78,8 +93,11 @@ export default function MatchPage() {
   const [sheetSets, setSheetSets] = useState(emptySetInputs);
   const [arbitrationSets, setArbitrationSets] = useState(emptySetInputs);
   const [arbitrationSeed, setArbitrationSeed] = useState<string | null>(null);
+  const [gridFormat, setGridFormat] = useState<MatchFormat | null>(null);
   const [homeLineup, setHomeLineup] = useState<string[]>([]);
   const [awayLineup, setAwayLineup] = useState<string[]>([]);
+  // Plateau : la composition d'une équipe est reprise de son match précédent de la journée.
+  const [lineupSeed, setLineupSeed] = useState<string | null>(null);
 
   async function guard(action: () => Promise<unknown>, success?: string) {
     setError(null);
@@ -121,6 +139,24 @@ export default function MatchPage() {
     clubLogoUrl: match.awayClubLogoUrl,
   };
 
+  // La grille de saisie suit le format du championnat, connu une fois la query revenue :
+  // cinq lignes au format standard, deux en plateau. Même motif d'ajustement pendant le rendu.
+  if (championship !== undefined && gridFormat !== format) {
+    setGridFormat(format);
+    setSheetSets(emptySetInputs(format));
+  }
+
+  // Reprise de la composition du plateau, une seule fois par match : le repère évite
+  // d'écraser une composition ajustée à la main.
+  if (isPlateau && homeCandidates !== undefined && awayCandidates !== undefined) {
+    const key = `${matchId}`;
+    if (key !== lineupSeed) {
+      setLineupSeed(key);
+      setHomeLineup(homeCandidates.previousOnMatchday);
+      setAwayLineup(awayCandidates.previousOnMatchday);
+    }
+  }
+
   // Arbitrage : l'administrateur corrige un score, il ne le ressaisit pas. On amorce donc
   // la grille avec la feuille contestée. Motif React d'ajustement d'état pendant le rendu :
   // le repère évite de réécraser les corrections à chaque re-rendu, et le statut le fait
@@ -132,14 +168,18 @@ export default function MatchPage() {
     const key = `${disputedSheet.status}:${JSON.stringify(disputedSheet.sets)}`;
     if (key !== arbitrationSeed) {
       setArbitrationSeed(key);
-      setArbitrationSets(setInputsFrom(disputedSheet.sets));
+      setArbitrationSets(setInputsFrom(disputedSheet.sets, format));
     }
   }
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-10">
       <p className="text-muted-foreground text-sm">
-        Journée {match.matchdayNumber} · {formatWindow(match.windowStart, match.windowEnd)}
+        {isPlateau ? "Plateau" : "Journée"} {match.matchdayNumber}
+        {isPlateau && match.slot !== undefined
+          ? ` · ${formatPlateau(match.slot)}`
+          : ` · ${formatWindow(match.windowStart, match.windowEnd)}`}
+        {championship ? ` · ${championship.name}` : ""}
       </p>
       <h1 className="flex flex-wrap items-center gap-3 text-2xl font-semibold tracking-tight">
         <ClubLogo name={match.homeClubName} logoUrl={match.homeClubLogoUrl} size={36} />
@@ -153,7 +193,10 @@ export default function MatchPage() {
         </Link>
       </h1>
       <div className="mt-3 flex flex-wrap items-center gap-3">
-        <Badge variant={matchStateVariant[match.state]}>{matchStateLabels[match.state]}</Badge>
+        <Badge variant={matchStateVariant[match.state]}>
+          {/* Un plateau n'a pas de créneau négocié : confirmé veut dire « à jouer ». */}
+          {isPlateau && match.state === "confirmed" ? "À jouer" : matchStateLabels[match.state]}
+        </Badge>
         {match.slot === undefined ? (
           <span className="text-muted-foreground text-sm">Créneau à fixer</span>
         ) : (
@@ -164,7 +207,11 @@ export default function MatchPage() {
         {match.result === undefined ? null : (
           <span className="text-sm font-semibold">
             {formatSets(match.result.homeSets, match.result.awaySets)}
-            {match.forfeitAgainst === undefined ? "" : " (forfait)"}
+            {match.forfeitAgainst !== undefined
+              ? " (forfait)"
+              : match.result.winnerTeamId === undefined
+                ? " (match nul)"
+                : ""}
           </span>
         )}
       </div>
@@ -183,6 +230,7 @@ export default function MatchPage() {
               homeTeamName={match.homeTeamName}
               awayTeamName={match.awayTeamName}
               sets={publicSheet.sets}
+              format={format}
             />
             {publicSheet.homeLineup.length === 0 && publicSheet.awayLineup.length === 0 ? (
               <p className="text-muted-foreground text-sm">
@@ -335,7 +383,7 @@ export default function MatchPage() {
             </Card>
           ) : null}
 
-          {match.state === "confirmed" && !playable ? (
+          {match.state === "confirmed" && !playable && !isPlateau ? (
             <Card className="mt-6">
               <CardHeader>
                 <CardTitle className="text-base">Demander un report</CardTitle>
@@ -398,13 +446,16 @@ export default function MatchPage() {
             </Card>
           ) : null}
 
-          {match.state === "confirmed" && playable && (history.iAmHome || history.iAmAdmin) ? (
+          {match.state === "confirmed" && playable && entering ? (
             <Card className="mt-6">
               <CardHeader>
-                <CardTitle className="text-base">Feuille de match</CardTitle>
+                <CardTitle className="text-base">
+                  {isPlateau ? "Résultat du plateau" : "Feuille de match"}
+                </CardTitle>
                 <CardDescription>
-                  Transcrivez la feuille unique : le score par set et les compositions des deux
-                  équipes. Le visiteur validera l&apos;ensemble.
+                  {isPlateau
+                    ? "Saisissez le score des 2 sets et les compositions. Le match est terminé dès l'enregistrement : pas de validation du visiteur. La composition de chaque équipe est reprise de son match précédent du plateau."
+                    : "Transcrivez la feuille unique : le score par set et les compositions des deux équipes. Le visiteur validera l'ensemble."}
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-6">
@@ -416,19 +467,22 @@ export default function MatchPage() {
                       away={awayColumn}
                       sets={sheetSets}
                       onChange={setSheetSets}
+                      format={format}
                     />
                   </div>
                 </div>
 
                 <LineupPicker
                   title={`Composition ${match.homeTeamName}`}
-                  players={homeRoster ?? []}
+                  players={homeCandidates?.players ?? []}
+                  context={homeCandidates?.context ?? null}
                   selected={homeLineup}
                   onToggle={setHomeLineup}
                 />
                 <LineupPicker
                   title={`Composition ${match.awayTeamName}`}
-                  players={awayRoster ?? []}
+                  players={awayCandidates?.players ?? []}
+                  context={awayCandidates?.context ?? null}
                   selected={awayLineup}
                   onToggle={setAwayLineup}
                 />
@@ -437,22 +491,28 @@ export default function MatchPage() {
                   className="self-start"
                   onClick={() =>
                     guard(async () => {
-                      const { tacitDeadline } = await submitSheet({
+                      const payload = {
                         matchId,
                         sets: collectSets(sheetSets),
                         homeLineup: homeLineup as Id<"players">[],
                         awayLineup: awayLineup as Id<"players">[],
-                      });
-                      setSheetSets(emptySetInputs());
+                      };
+                      if (isPlateau) {
+                        await recordResult(payload);
+                        setNotice("Résultat enregistré : le match entre au classement.");
+                      } else {
+                        const { tacitDeadline } = await submitSheet(payload);
+                        setNotice(
+                          `Feuille envoyée. Sans réponse du visiteur, elle sera validée ${formatCountdown(tacitDeadline)}.`,
+                        );
+                      }
+                      setSheetSets(emptySetInputs(format));
                       setHomeLineup([]);
                       setAwayLineup([]);
-                      setNotice(
-                        `Feuille envoyée. Sans réponse du visiteur, elle sera validée ${formatCountdown(tacitDeadline)}.`,
-                      );
                     })
                   }
                 >
-                  Envoyer la feuille
+                  {isPlateau ? "Enregistrer le résultat" : "Envoyer la feuille"}
                 </Button>
               </CardContent>
             </Card>
@@ -473,8 +533,9 @@ export default function MatchPage() {
                   homeTeamName={match.homeTeamName}
                   awayTeamName={match.awayTeamName}
                   sets={sheet.sets}
+                  format={format}
                 />
-                <LineupSummary
+                <FlaggedLineups
                   homeTeamName={match.homeTeamName}
                   awayTeamName={match.awayTeamName}
                   sheet={sheet}
@@ -520,6 +581,10 @@ export default function MatchPage() {
             </Card>
           ) : null}
 
+          {match.state === "completed" && sheet !== undefined && sheet !== null ? (
+            <FlaggedSummary sheet={sheet} />
+          ) : null}
+
           {match.state === "disputed" && history.iAmAdmin && sheet ? (
             <Card className="mt-6">
               <CardHeader>
@@ -536,9 +601,15 @@ export default function MatchPage() {
                       homeTeamName={match.homeTeamName}
                       awayTeamName={match.awayTeamName}
                       sets={sheet.sets}
+                      format={format}
                     />
                   </div>
                 </div>
+                <FlaggedLineups
+                  homeTeamName={match.homeTeamName}
+                  awayTeamName={match.awayTeamName}
+                  sheet={sheet}
+                />
                 <div>
                   <p className="text-sm font-medium">
                     Score à arrêter{" "}
@@ -553,6 +624,7 @@ export default function MatchPage() {
                       sets={arbitrationSets}
                       onChange={setArbitrationSets}
                       idPrefix="Arbitrage — "
+                      format={format}
                     />
                   </div>
                 </div>
@@ -576,7 +648,8 @@ export default function MatchPage() {
               <CardHeader>
                 <CardTitle className="text-base">Prononcer un forfait</CardTitle>
                 <CardDescription>
-                  Le match est terminé sur un score conventionnel de 3-0 (25-0 par set).
+                  Le match est terminé sur un score conventionnel de{" "}
+                  {forfeitScore(format).length}-0 (25-0 par set).
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-wrap gap-3">
@@ -606,6 +679,7 @@ export default function MatchPage() {
             </Card>
           ) : null}
 
+          {isPlateau ? null : (
           <Card className="mt-6">
             <CardHeader>
               <CardTitle className="text-base">Historique</CardTitle>
@@ -634,91 +708,107 @@ export default function MatchPage() {
               ))}
             </CardContent>
           </Card>
+          )}
         </>
       )}
     </main>
   );
 }
 
-/**
- * Choix des joueurs alignés.
- *
- * Un joueur dont la licence ne couvre pas la date du match est **décoché et désactivé**,
- * avec le motif écrit à côté. Convex refuserait la feuille de toute façon ; l'annoncer ici
- * évite de remplir tout le formulaire pour se le voir rejeter à l'envoi.
- */
-function LineupPicker({
-  title,
-  players,
-  selected,
-  onToggle,
+type PrivateSheet = NonNullable<FunctionReturnType<typeof api.sheets.get>>;
+type PrivateLineupPlayer = PrivateSheet["homeLineup"][number];
+
+/** La situation d'un joueur aligné, et ses signalements, à côté de son nom. */
+function ReinforcementBadges({
+  player,
+  quota,
 }: {
-  title: string;
-  players: {
-    _id: string;
-    firstName: string;
-    lastName: string;
-    license: { number: string | null; validUntil: number | null; isValid: boolean };
-  }[];
-  selected: string[];
-  onToggle: (next: string[]) => void;
+  player: PrivateLineupPlayer;
+  quota: PrivateSheet["quota"];
 }) {
-  const ineligible = players.filter((player) => !player.license.isValid);
+  const { reinforcement } = player;
+  const label = kindLabel(reinforcement.kind);
   return (
+    <>
+      {label === null ? null : (
+        <Badge variant="muted">
+          {label}
+          {reinforcement.originTeamName === null ? "" : ` · ${reinforcement.originTeamName}`}
+          {reinforcement.kind === "upward"
+            ? ` · ${reinforcement.upperMatchNumber}/${UPPER_LEVEL_MATCH_LIMIT}`
+            : ""}
+        </Badge>
+      )}
+      {reinforcement.flags.map((flag) => (
+        <Badge key={flag} variant="secondary">
+          {flagMessage(flag, { playerId: player._id, ...reinforcement }, quota)}
+        </Badge>
+      ))}
+    </>
+  );
+}
+
+/**
+ * Compositions d'une feuille, avec renforts et signalements : ce que le visiteur doit voir
+ * avant de valider, et l'administrateur avant de trancher. Jamais sur la feuille publique.
+ */
+function FlaggedLineups({
+  homeTeamName,
+  awayTeamName,
+  sheet,
+}: {
+  homeTeamName: string;
+  awayTeamName: string;
+  sheet: PrivateSheet;
+}) {
+  const column = (teamName: string, lineup: PrivateLineupPlayer[]) => (
     <div>
-      <p className="text-sm font-medium">
-        {title}{" "}
-        <span className="text-muted-foreground font-normal">
-          ({selected.length} sélectionné(s), 12 maximum)
-        </span>
-      </p>
-      {players.length === 0 ? (
-        <p className="text-muted-foreground mt-2 text-sm">Effectif vide.</p>
-      ) : (
-        <div className="mt-2 grid gap-1 sm:grid-cols-2">
-          {players.map((player) => (
-            <label
-              key={player._id}
-              className={
-                player.license.isValid
-                  ? "flex items-center gap-2 text-sm"
-                  : "text-muted-foreground flex items-center gap-2 text-sm"
-              }
-            >
-              <input
-                type="checkbox"
-                disabled={!player.license.isValid}
-                checked={selected.includes(player._id)}
-                onChange={(event) =>
-                  onToggle(
-                    event.target.checked
-                      ? [...selected, player._id]
-                      : selected.filter((id) => id !== player._id),
-                  )
-                }
-              />
-              <span>
-                {player.lastName.toUpperCase()} {player.firstName}
-              </span>
-              {player.license.isValid ? null : (
-                <Badge variant="destructive">
-                  {player.license.validUntil === null
-                    ? "sans licence"
-                    : `licence expirée le ${formatDate(player.license.validUntil)}`}
-                </Badge>
-              )}
-            </label>
-          ))}
-        </div>
-      )}
-      {ineligible.length === 0 ? null : (
-        <p className="text-muted-foreground mt-2 text-xs">
-          {ineligible.length} joueur{ineligible.length > 1 ? "s" : ""} non alignable
-          {ineligible.length > 1 ? "s" : ""} : la licence doit couvrir la date du match.
-          Délivrez-en une depuis la fiche du joueur.
-        </p>
-      )}
+      <p className="font-medium">{teamName}</p>
+      <ul className="mt-1 flex flex-col gap-1">
+        {lineup.map((player) => (
+          <li key={player._id} className="flex flex-wrap items-center gap-2">
+            <Link href={`/joueurs/${player._id}`} className="text-muted-foreground hover:underline">
+              {player.name}
+            </Link>
+            <ReinforcementBadges player={player} quota={sheet.quota} />
+          </li>
+        ))}
+      </ul>
     </div>
+  );
+  return (
+    <div className="grid gap-4 text-sm sm:grid-cols-2">
+      {column(homeTeamName, sheet.homeLineup)}
+      {column(awayTeamName, sheet.awayLineup)}
+    </div>
+  );
+}
+
+/** Pour un match terminé : les renforts signalés, rappelés aux comptes concernés. */
+function FlaggedSummary({ sheet }: { sheet: PrivateSheet }) {
+  const flagged = [...sheet.homeLineup, ...sheet.awayLineup].filter(
+    (player) => player.reinforcement.flags.length > 0,
+  );
+  if (flagged.length === 0) {
+    return null;
+  }
+  return (
+    <Card className="mt-6">
+      <CardHeader>
+        <CardTitle className="text-base">Renforts signalés</CardTitle>
+        <CardDescription>
+          La feuille a été acceptée : ces signalements restent visibles du comité.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-1 text-sm">
+        {flagged.map((player) => (
+          <p key={player._id} className="flex flex-wrap items-center gap-2">
+            <span className="font-medium">{player.name}</span>
+            <ReinforcementBadges player={player} quota={sheet.quota} />
+          </p>
+        ))}
+      </CardContent>
+    </Card>
   );
 }
 

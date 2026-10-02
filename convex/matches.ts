@@ -164,12 +164,16 @@ export const create = mutation({
         match.homeTeamId === args.homeTeamId && match.awayTeamId === args.awayTeamId,
     );
 
+    // Plateau : pas de négociation, le match naît confirmé à la date et dans la salle du
+    // plateau. Une équipe y joue autant de matchs que l'administrateur en programme.
     const matchId = await ctx.db.insert("matches", {
       championshipId: matchday.championshipId,
       matchdayId: args.matchdayId,
       homeTeamId: args.homeTeamId,
       awayTeamId: args.awayTeamId,
-      state: "planned",
+      ...(matchday.plateau === undefined
+        ? { state: "planned" as const }
+        : { state: "confirmed" as const, slot: matchday.plateau }),
     });
 
     return {
@@ -183,7 +187,10 @@ export const create = mutation({
   },
 });
 
-/** Corrige un match tant qu'aucun créneau n'est confirmé. */
+/**
+ * Corrige un match tant qu'aucun créneau n'est confirmé — ou, sur un plateau, tant qu'il
+ * n'est pas joué : son créneau est celui du plateau, il n'a rien de négocié.
+ */
 export const updatePlanned = mutation({
   args: {
     matchId: v.id("matches"),
@@ -198,9 +205,13 @@ export const updatePlanned = mutation({
     if (match === null) {
       throw new ConvexError("Match inconnu.");
     }
-    if (match.state !== "planned") {
+    const currentDay = await ctx.db.get(match.matchdayId);
+    const onPlateau = currentDay?.plateau !== undefined;
+    if (onPlateau ? match.state !== "confirmed" : match.state !== "planned") {
       throw new ConvexError(
-        "Ce match n'est plus modifiable : une négociation est engagée. Passez par un report.",
+        onPlateau
+          ? "Ce match de plateau est déjà joué : corrigez sa feuille plutôt."
+          : "Ce match n'est plus modifiable : une négociation est engagée. Passez par un report.",
       );
     }
     const homeTeamId = args.homeTeamId ?? match.homeTeamId;
@@ -224,6 +235,7 @@ export const updatePlanned = mutation({
       homeTeamId,
       awayTeamId,
       championshipId: matchday.championshipId,
+      ...(matchday.plateau === undefined ? {} : { slot: matchday.plateau }),
     });
     return null;
   },
@@ -296,6 +308,24 @@ async function matchesOfTeams(ctx: QueryCtx, teamIds: Id<"teams">[]) {
   return matches;
 }
 
+/** Mémoire d'une requête : le format de chaque championnat rencontré. */
+type PlateauCache = Map<Id<"championships">, boolean>;
+
+async function isPlateau(
+  ctx: QueryCtx,
+  championshipId: Id<"championships">,
+  cache: PlateauCache,
+): Promise<boolean> {
+  const known = cache.get(championshipId);
+  if (known !== undefined) {
+    return known;
+  }
+  const championship = await ctx.db.get(championshipId);
+  const plateau = championship?.format === "plateau";
+  cache.set(championshipId, plateau);
+  return plateau;
+}
+
 /**
  * Ce que ce match attend du compte donné, et l'échéance tacite qui court le cas échéant.
  *
@@ -309,8 +339,13 @@ async function classifyTodo(
   userId: Id<"users">,
   managed: Set<string>,
   now: number,
+  plateaus: PlateauCache,
 ): Promise<{ action: TodoAction; deadline: number | null } | null> {
   if (match.state === "completed") {
+    return null;
+  }
+  // Un plateau n'attend rien des responsables : l'administrateur en saisit les résultats.
+  if (await isPlateau(ctx, match.championshipId, plateaus)) {
     return null;
   }
   const iAmHome = managed.has(String(match.homeTeamId));
@@ -380,11 +415,12 @@ export const myTodo = query({
     const matches = await matchesOfTeams(ctx, teamIds);
     const now = Date.now();
     const managed = new Set(teamIds.map(String));
+    const plateaus: PlateauCache = new Map();
     const cache = newTeamCache();
     const todo = [];
 
     for (const match of matches) {
-      const classified = await classifyTodo(ctx, match, user._id, managed, now);
+      const classified = await classifyTodo(ctx, match, user._id, managed, now, plateaus);
       if (classified === null) {
         continue;
       }
@@ -423,10 +459,11 @@ export const myTodoCount = query({
     const matches = await matchesOfTeams(ctx, teamIds);
     const now = Date.now();
     const managed = new Set(teamIds.map(String));
+    const plateaus: PlateauCache = new Map();
     let count = 0;
 
     for (const match of matches) {
-      const classified = await classifyTodo(ctx, match, user._id, managed, now);
+      const classified = await classifyTodo(ctx, match, user._id, managed, now, plateaus);
       if (classified !== null && classified.action !== "waiting") {
         count++;
       }

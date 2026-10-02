@@ -1,9 +1,11 @@
 import { v } from "convex/values";
 
+import { flagMessage } from "../lib/rules/reinforcement";
 import type { Id } from "./_generated/dataModel";
 import { query } from "./_generated/server";
 import { requireAdmin } from "./authz";
 import { matchSummary, newTeamCache, summarize } from "./matches";
+import { assessTeamLineup, newChampionshipCache } from "./reinforcements";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -221,6 +223,86 @@ export const progress = query({
           disputed: count(["disputed"]),
         };
       }),
+    );
+  },
+});
+
+/**
+ * Renforts signalés sur les feuilles d'un championnat : joueur sans feuille verte dans le
+ * circuit, descente de niveau hors quota, 4ᵉ match au-dessus de son niveau, quota dépassé.
+ *
+ * Rien n'est refusé à la saisie (ADR-0005) : cette vue est là pour que le comité puisse en
+ * juger après coup. Les signalements sont recalculés à la lecture — un changement de niveau
+ * ou de quota s'y reflète aussitôt.
+ */
+export const reinforcementFlags = query({
+  args: { championshipId: v.id("championships") },
+  returns: v.array(
+    v.object({
+      matchId: v.id("matches"),
+      matchdayNumber: v.number(),
+      matchAt: v.union(v.number(), v.null()),
+      teamName: v.string(),
+      playerId: v.id("players"),
+      playerName: v.string(),
+      originTeamName: v.union(v.string(), v.null()),
+      messages: v.array(v.string()),
+    }),
+  ),
+  handler: async (ctx, { championshipId }) => {
+    await requireAdmin(ctx);
+    const championship = await ctx.db.get(championshipId);
+    if (championship === null) {
+      return [];
+    }
+    const quota = championship.reinforcementQuota ?? null;
+    const matches = await ctx.db
+      .query("matches")
+      .withIndex("by_championship", (q) => q.eq("championshipId", championshipId))
+      .collect();
+    const cache = newChampionshipCache();
+    const rows = [];
+
+    for (const match of matches) {
+      const entries = await ctx.db
+        .query("lineupEntries")
+        .withIndex("by_match", (q) => q.eq("matchId", match._id))
+        .collect();
+      if (entries.length === 0) {
+        continue;
+      }
+      const matchday = await ctx.db.get(match.matchdayId);
+      for (const teamId of [match.homeTeamId, match.awayTeamId]) {
+        const playerIds = entries
+          .filter((entry) => entry.teamId === teamId)
+          .map((entry) => entry.playerId);
+        const assessed = await assessTeamLineup(ctx, match, teamId, playerIds, cache);
+        const team = await ctx.db.get(teamId);
+        for (const [playerId, assessment] of assessed) {
+          if (assessment.flags.length === 0) {
+            continue;
+          }
+          const player = await ctx.db.get(playerId);
+          rows.push({
+            matchId: match._id,
+            matchdayNumber: matchday?.number ?? 0,
+            matchAt: match.slot?.at ?? null,
+            teamName: team?.name ?? "",
+            playerId,
+            playerName:
+              player === null ? "Joueur supprimé" : `${player.firstName} ${player.lastName}`,
+            originTeamName: assessment.originTeamName,
+            messages: assessment.flags.map((flag) => flagMessage(flag, assessment, quota)),
+          });
+        }
+      }
+    }
+
+    return rows.sort(
+      (a, b) =>
+        a.matchdayNumber - b.matchdayNumber ||
+        (a.matchAt ?? 0) - (b.matchAt ?? 0) ||
+        a.playerName.localeCompare(b.playerName, "fr"),
     );
   },
 });

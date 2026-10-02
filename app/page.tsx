@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
-import { formatWindow } from "@/lib/format";
+import { formatPlateau, formatWindow } from "@/lib/format";
 import { matchdayStatusLabels } from "@/lib/labels";
 
 export default function Home() {
@@ -103,7 +103,7 @@ export default function Home() {
               {standings === undefined ? (
                 <p className="text-muted-foreground text-sm">Chargement…</p>
               ) : (
-                <StandingsTable rows={standings} />
+                <StandingsTable rows={standings} format={championship?.format} />
               )}
             </CardContent>
           </Card>
@@ -116,7 +116,9 @@ export default function Home() {
                   : `${matchdayStatusLabels[matchday.status]} — journée ${matchday.number}`}
                 {matchday === undefined || matchday === null ? null : (
                   <span className="text-muted-foreground ml-2 text-sm font-normal">
-                    {formatWindow(matchday.windowStart, matchday.windowEnd)}
+                    {matchday.plateau === undefined
+                      ? formatWindow(matchday.windowStart, matchday.windowEnd)
+                      : formatPlateau(matchday.plateau)}
                   </span>
                 )}
               </CardTitle>

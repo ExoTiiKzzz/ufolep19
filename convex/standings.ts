@@ -7,6 +7,7 @@ import { query } from "./_generated/server";
  * Classement d'un championnat.
  *
  * Dérivé à la lecture des matchs terminés, jamais stocké comme état modifiable à la main.
+ * Le barème suit le format du championnat : standard, ou plateau (provisoire).
  * Lecture publique : aucune donnée nominative.
  */
 export const byChampionship = query({
@@ -20,6 +21,7 @@ export const byChampionship = query({
       rank: v.number(),
       played: v.number(),
       wins: v.number(),
+      draws: v.number(),
       losses: v.number(),
       setsWon: v.number(),
       setsLost: v.number(),
@@ -29,6 +31,7 @@ export const byChampionship = query({
     }),
   ),
   handler: async (ctx, { championshipId }) => {
+    const championship = await ctx.db.get(championshipId);
     const teams = await ctx.db
       .query("teams")
       .withIndex("by_championship", (q) => q.eq("championshipId", championshipId))
@@ -58,6 +61,7 @@ export const byChampionship = query({
     const rows = computeStandings(
       teams.map((team) => team._id),
       outcomes,
+      championship?.format ?? "standard",
     );
     // Un club engage parfois plusieurs équipes : on ne le relit qu'une fois.
     const clubs = new Map<string, { name: string; logoUrl: string | null }>();

@@ -83,6 +83,21 @@ export function transitionTo(
   }
 }
 
+/**
+ * Un plateau ne se négocie pas : sa date et sa salle sont fixées par l'administrateur pour
+ * toute la journée. Ni proposition de créneau, ni report entre responsables — on déplace le
+ * plateau lui-même.
+ */
+async function assertNegotiable(ctx: Ctx, match: Doc<"matches">) {
+  const championship = await ctx.db.get(match.championshipId);
+  if (championship?.format === "plateau") {
+    throw new ConvexError(
+      "Ce match se joue sur un plateau : sa date et sa salle sont fixées par l'administrateur, " +
+        "pour toute la journée.",
+    );
+  }
+}
+
 /** Annule l'échéance tacite en cours, s'il y en a une. */
 async function cancelTacit(ctx: MutationCtx, match: Doc<"matches">) {
   if (match.tacitJobId !== undefined) {
@@ -118,6 +133,7 @@ export const proposeSlot = mutation({
   returns: v.object({ tacitDeadline: v.union(v.number(), v.null()) }),
   handler: async (ctx, args) => {
     const match = await mustGetMatch(ctx, args.matchId);
+    await assertNegotiable(ctx, match);
     const sides = await sidesOf(ctx, match);
     const to = transitionTo("proposeSlot", match.state, actorFor(sides, "home"));
 
@@ -258,6 +274,7 @@ export const requestPostponement = mutation({
   returns: v.null(),
   handler: async (ctx, { matchId, reason }) => {
     const match = await mustGetMatch(ctx, matchId);
+    await assertNegotiable(ctx, match);
     const sides = await sidesOf(ctx, match);
     if (match.state !== "confirmed") {
       throw new ConvexError("Seul un match dont le créneau est ferme peut être reporté.");
@@ -315,6 +332,7 @@ export const imposePostponement = mutation({
   handler: async (ctx, { matchId, reason }) => {
     const admin = await requireAdmin(ctx);
     const match = await mustGetMatch(ctx, matchId);
+    await assertNegotiable(ctx, match);
     const to = transitionTo("postpone", match.state, "admin");
     assertBeforeSlot(match);
 

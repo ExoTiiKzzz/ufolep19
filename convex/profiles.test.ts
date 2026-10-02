@@ -5,6 +5,7 @@ import { api } from "./_generated/api";
 import schema from "./schema";
 import {
   forceConfirmed,
+  insertChampionship,
   LICENSE_FROM,
   LICENSE_UNTIL,
   modules,
@@ -26,7 +27,7 @@ test("la fiche d'un club expose ses équipes, saison courante en tête", async (
   // Une équipe du même club dans une saison antérieure.
   await t.run(async (ctx) => {
     const seasonId = await ctx.db.insert("seasons", { label: "2024-2025", isCurrent: false });
-    const championshipId = await ctx.db.insert("championships", {
+    const championshipId = await insertChampionship(ctx, {
       seasonId,
       name: "Départemental mixte",
     });

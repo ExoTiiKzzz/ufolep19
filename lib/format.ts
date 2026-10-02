@@ -31,6 +31,23 @@ export function formatWindow(start: number, end: number): string {
   return `du ${dateFormat.format(new Date(start))} au ${dateFormat.format(new Date(end))}`;
 }
 
+/** « sam. 10 janv. 2026, 14:00 · Gymnase de Malemort » : la date et la salle d'un plateau. */
+export function formatPlateau(plateau: { at: number; venue: string }): string {
+  return `${formatDateTime(plateau.at)} · ${plateau.venue}`;
+}
+
+/**
+ * Bornes du jour parisien d'un instant : la fenêtre d'une journée de plateau, qui se joue
+ * en un jour.
+ */
+export function parisDayOf(at: number): { start: number; end: number } {
+  const { year, month, day } = parisParts(at);
+  return {
+    start: parisWallClock(year, month, day, 0, 0, 0, 0),
+    end: parisWallClock(year, month, day, 23, 59, 59, 999),
+  };
+}
+
 /** Compte à rebours lisible : « dans 3 jours », « dans 5 h », « échéance dépassée ». */
 export function formatCountdown(at: number, now = Date.now()): string {
   const ms = at - now;

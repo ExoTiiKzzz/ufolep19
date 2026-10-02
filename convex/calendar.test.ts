@@ -3,7 +3,13 @@ import { expect, test } from "vitest";
 
 import { api } from "./_generated/api";
 import schema from "./schema";
-import { modules, setupChampionship, WINDOW_END, WINDOW_START } from "./test.setup";
+import {
+  insertChampionship,
+  modules,
+  setupChampionship,
+  WINDOW_END,
+  WINDOW_START,
+} from "./test.setup";
 
 test("une journée est bornée par une fenêtre de dates", async () => {
   const t = convexTest(schema, modules);
@@ -67,7 +73,7 @@ test("une équipe non engagée dans le championnat est refusée", async () => {
   const t = convexTest(schema, modules);
   const s = await setupChampionship(t);
   const otherTeam = await t.run(async (ctx) => {
-    const championshipId = await ctx.db.insert("championships", {
+    const championshipId = await insertChampionship(ctx, {
       seasonId: s.seasonId,
       name: "Autre championnat",
     });

@@ -3,7 +3,13 @@ import { afterEach, expect, test, vi } from "vitest";
 
 import { api } from "./_generated/api";
 import schema from "./schema";
-import { modules, setupChampionship, WINDOW_END, WINDOW_START } from "./test.setup";
+import {
+  insertChampionship,
+  modules,
+  setupChampionship,
+  WINDOW_END,
+  WINDOW_START,
+} from "./test.setup";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -14,8 +20,8 @@ test("les championnats sont listés saison courante en tête", async () => {
   const s = await setupChampionship(t);
   await t.run(async (ctx) => {
     const older = await ctx.db.insert("seasons", { label: "2024-2025", isCurrent: false });
-    await ctx.db.insert("championships", { seasonId: older, name: "Départemental mixte" });
-    await ctx.db.insert("championships", { seasonId: s.seasonId, name: "Loisir" });
+    await insertChampionship(ctx, { seasonId: older, name: "Départemental mixte" });
+    await insertChampionship(ctx, { seasonId: s.seasonId, name: "Loisir" });
   });
 
   const all = await t.query(api.championships.listAll, {});
@@ -96,7 +102,7 @@ test("un championnat sans journée ne rend rien, sans échouer", async () => {
   const t = convexTest(schema, modules);
   const s = await setupChampionship(t);
   const empty = await t.run(async (ctx) =>
-    ctx.db.insert("championships", { seasonId: s.seasonId, name: "Championnat vide" }),
+    insertChampionship(ctx, { seasonId: s.seasonId, name: "Championnat vide" }),
   );
 
   expect(await t.query(api.matchdays.currentOrNext, { championshipId: empty })).toBeNull();

@@ -3,6 +3,7 @@
 import type { TestConvex } from "convex-test";
 
 import type { Id } from "./_generated/dataModel";
+import type { MutationCtx } from "./_generated/server";
 import type schema from "./schema";
 
 /**
@@ -61,6 +62,52 @@ export async function seedAccount(
   return await t.run(async (ctx) => ctx.db.insert("users", { email, name, role }));
 }
 
+/** Nom du circuit principal semé par défaut : celui de D1, D2, D3 et du mixte. */
+export const MAIN_CIRCUIT = "Championnat";
+
+/**
+ * Insère un championnat directement en base. Sans circuit désigné, il rejoint le circuit
+ * principal de sa saison, créé au besoin : c'est le cas de la plupart des tests, qui ne
+ * portent ni sur l'unicité de la feuille verte ni sur les renforts.
+ */
+export async function insertChampionship(
+  ctx: MutationCtx,
+  {
+    seasonId,
+    name,
+    circuitId,
+    level = 1,
+    format = "standard",
+    reinforcementQuota,
+  }: {
+    seasonId: Id<"seasons">;
+    name: string;
+    circuitId?: Id<"circuits">;
+    level?: number;
+    format?: "standard" | "plateau";
+    reinforcementQuota?: { maxPlayers: number; completeTo: number };
+  },
+): Promise<Id<"championships">> {
+  let circuit = circuitId;
+  if (circuit === undefined) {
+    const existing = (
+      await ctx.db
+        .query("circuits")
+        .withIndex("by_season", (q) => q.eq("seasonId", seasonId))
+        .collect()
+    ).find((candidate) => candidate.name === MAIN_CIRCUIT);
+    circuit = existing?._id ?? (await ctx.db.insert("circuits", { seasonId, name: MAIN_CIRCUIT }));
+  }
+  return await ctx.db.insert("championships", {
+    seasonId,
+    circuitId: circuit,
+    name,
+    level,
+    format,
+    reinforcementQuota,
+  });
+}
+
 export async function seedSeason(
   t: T,
   { label, isCurrent = false }: { label: string; isCurrent?: boolean },
@@ -94,7 +141,7 @@ export async function setupChampionship(t: T, { label = "2025-2026" } = {}) {
 
   return await t.run(async (ctx) => {
     const seasonId = await ctx.db.insert("seasons", { label, isCurrent: true });
-    const championshipId = await ctx.db.insert("championships", {
+    const championshipId = await insertChampionship(ctx, {
       seasonId,
       name: "Départemental mixte",
     });

@@ -14,8 +14,20 @@ import type { api } from "@/convex/_generated/api";
 
 type Row = FunctionReturnType<typeof api.standings.byChampionship>[number];
 
-/** Classement d'un championnat, partagé par la page d'accueil et la page du championnat. */
-export function StandingsTable({ rows }: { rows: Row[] }) {
+/**
+ * Classement d'un championnat, partagé par la page d'accueil et la page du championnat.
+ *
+ * La colonne des matchs nuls n'apparaît qu'au format plateau : ailleurs, elle serait
+ * toujours à zéro.
+ */
+export function StandingsTable({
+  rows,
+  format = "standard",
+}: {
+  rows: Row[];
+  format?: "standard" | "plateau";
+}) {
+  const showDraws = format === "plateau";
   if (rows.length === 0) {
     return <p className="text-muted-foreground text-sm">Aucune équipe engagée.</p>;
   }
@@ -28,6 +40,7 @@ export function StandingsTable({ rows }: { rows: Row[] }) {
           <TableHead>Équipe</TableHead>
           <TableHead className="text-right">J</TableHead>
           <TableHead className="text-right">V</TableHead>
+          {showDraws ? <TableHead className="text-right">N</TableHead> : null}
           <TableHead className="text-right">D</TableHead>
           <TableHead className="text-right">Sets</TableHead>
           <TableHead className="text-right">Points</TableHead>
@@ -51,6 +64,7 @@ export function StandingsTable({ rows }: { rows: Row[] }) {
             </TableCell>
             <TableCell className="text-right">{row.played}</TableCell>
             <TableCell className="text-right">{row.wins}</TableCell>
+            {showDraws ? <TableCell className="text-right">{row.draws}</TableCell> : null}
             <TableCell className="text-right">{row.losses}</TableCell>
             <TableCell className="text-right">
               {row.setsWon} / {row.setsLost}

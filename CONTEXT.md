@@ -13,8 +13,8 @@ Structure locale affiliée à l'UFOLEP 19. Rattache des joueurs et une ou plusie
 _Avoid_: association, section
 
 **Joueur** (`player`):
-Fiche d'un licencié rattaché à un club et affecté à une ou plusieurs équipes de ce club. Existe
-sans compte utilisateur : c'est une donnée d'effectif, pas un utilisateur.
+Fiche d'un licencié rattaché à un club et affecté à des équipes de ce club — au plus une par
+circuit et par saison. Existe sans compte utilisateur : c'est une donnée d'effectif, pas un utilisateur.
 _Avoid_: licencié, membre, adhérent
 
 **Licence** (`license`):
@@ -42,16 +42,45 @@ traversent ; une équipe appartient à une seule saison.
 _Avoid_: année, exercice, millésime
 
 **Championnat** (`championship`):
-Compétition d'une saison regroupant N équipes, qui porte un calendrier et un classement.
+Compétition d'une saison regroupant N équipes, qui porte un calendrier et un classement. Il
+appartient à un circuit, a un niveau et un format, réglés indépendamment.
 _Avoid_: division, poule, compétition, ligue
+
+**Circuit** (`circuit`):
+Groupe de championnats d'une saison à l'intérieur duquel un joueur ne figure que sur une seule
+feuille verte. Le circuit principal regroupe D1, D2, D3 et le mixte ; la coupe et le féminin
+forment chacun un circuit à part, où un joueur peut avoir sa propre feuille verte.
+_Avoid_: filière, compétition, catégorie
+
+**Niveau** (`level`):
+Rang d'un championnat dans son circuit, 1 étant le plus fort. « D1 », « D2 », « D3 » désignent
+les championnats de niveau 1, 2, 3 du circuit principal ; le mixte est de niveau 3.
+_Avoid_: division, catégorie, rang
+
+**Quota de renforts** (`reinforcementQuota`):
+Règle d'un championnat qui admet des joueurs venus d'un niveau plus fort, en nombre limité et
+seulement pour compléter sa composition : au mixte, 2 joueurs de D1/D2 au plus, pour compléter
+à 6.
+_Avoid_: dérogation, joker, exception
+
+**Format** (`format`):
+Ensemble des règles de score et de classement d'un championnat, indépendant de son circuit :
+*standard* (meilleur des 5 sets) ou *plateau* (2 sets secs).
+_Avoid_: type, règlement, mode
 
 **Match** (`match`):
 Rencontre entre deux équipes d'un même championnat, issue du calendrier d'un championnat.
 _Avoid_: rencontre, partie, confrontation
 
 **Set** (`set`):
-Manche d'un match, portant le score des deux équipes. Un match en compte de 3 à 5.
+Manche d'un match, portant le score des deux équipes. Un match au format standard en compte de 3
+à 5 ; un match de plateau en compte toujours exactement 2, joués tous deux.
 _Avoid_: manche, période
+
+**Match nul** (`draw`):
+Issue d'un match de plateau à un set partout et à égalité de points marqués. N'existe pas au
+format standard, où un match a toujours un vainqueur.
+_Avoid_: égalité, ex aequo (réservé au classement)
 
 **Tie-break** (`tieBreak`):
 Cinquième et dernier set d'un match, joué en 15 points au lieu de 25. Ne se joue qu'à 2 sets
@@ -64,6 +93,13 @@ _Avoid_: belle, set décisif, cinquième manche
 Regroupement numéroté de matchs d'un championnat, borné par une fenêtre de dates. Un match
 appartient à exactement une journée.
 _Avoid_: ronde, tour, étape, semaine
+
+**Plateau** (`tournamentDay`):
+Journée d'un championnat au format plateau : les équipes se retrouvent à une date et dans une
+salle fixées par l'administrateur, et y jouent autant de matchs que prévu. Pas de négociation de
+créneau ni de validation du visiteur : l'administrateur saisit lui-même les matchs et leurs
+résultats.
+_Avoid_: tournoi, rassemblement, regroupement
 
 **Fenêtre** (`window`):
 Intervalle de dates d'une journée, à l'intérieur duquel le créneau d'un match doit tomber. Elle
@@ -102,7 +138,7 @@ _Avoid_: accord implicite, auto-validation, expiration
 
 **Forfait** (`forfeit`):
 Match perdu par une équipe qui ne se présente pas ou renonce. Prononcé par un administrateur, il
-termine le match sur un score conventionnel de 3-0 (25-0 par set).
+termine le match sur un score conventionnel de 3-0 (25-0 par set) — 2-0 sur un plateau.
 _Avoid_: abandon, absence, walkover
 
 **Report** (`postponement`):
@@ -117,9 +153,26 @@ par le receveur, elle est validée en bloc par le visiteur.
 _Avoid_: fiche, rapport de match, PV
 
 **Composition** (`lineup`):
-Liste des joueurs d'une équipe effectivement alignés sur un match, choisis dans l'effectif de cette
-équipe. Au plus 12 joueurs ; aucun minimum, jouer en sous-effectif est permis.
+Liste des joueurs d'une équipe effectivement alignés sur un match, choisis parmi les joueurs de
+son club : ceux de sa feuille verte, et d'éventuels renforts. Au plus 12 joueurs ; aucun minimum,
+jouer en sous-effectif est permis.
 _Avoid_: compo, équipe alignée, joueurs présents
+
+**Renfort** (`reinforcement`):
+Joueur aligné dans une équipe de son club qui n'est pas celle de sa feuille verte dans le circuit
+du match. Un renfort n'est jamais refusé : il est **signalé** sur la feuille de match, et c'est
+aux équipes d'en juger. Au-delà de **3 matchs** joués au-dessus de son niveau d'origine, tous niveaux
+supérieurs confondus sur la saison, chaque nouveau match en renfort vers le haut est signalé.
+L'ordre est celui des dates de match, pas celui de la saisie. Un renfort **au même niveau** (D3 ↔ mixte) est
+affiché, mais ni signalé ni compté.
+_Avoid_: prêt, dépannage, joueur extérieur
+
+**Signalement** (`flag`):
+Anomalie relevée sur une composition sans empêcher la feuille de match d'être soumise : joueur
+sans feuille verte dans le circuit, renfort descendu d'un niveau plus fort hors quota, 4ᵉ match
+au-dessus de son niveau d'origine, quota de renforts dépassé. Visible du visiteur au moment de
+valider et de l'administrateur, jamais du public.
+_Avoid_: alerte, avertissement, infraction
 
 **Sous-effectif** (`shorthanded`):
 Situation d'une équipe qui se présente avec moins de joueurs que le format nominal. Le match se
@@ -127,6 +180,7 @@ joue normalement : c'est un désavantage sportif, pas un motif de forfait.
 _Avoid_: équipe incomplète, effectif insuffisant
 
 **Effectif** (`roster`):
-Ensemble des joueurs rattachés à une équipe pour la saison. La composition d'un match est
-nécessairement un sous-ensemble de l'effectif.
+Ensemble des joueurs rattachés à une équipe pour la saison. Il fixe le niveau d'origine d'un
+joueur : aligné ailleurs dans le circuit, ce joueur est un renfort. Affiché **« Feuille verte »** dans l'UI, le mot
+des clubs : c'est un libellé, pas un concept distinct.
 _Avoid_: liste, groupe, contingent

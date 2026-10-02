@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  decidedOutcome,
   decidedWinner,
   forfeitScore,
   setsWonSoFar,
@@ -162,5 +163,65 @@ describe("vainqueur désigné", () => {
 
   test("ne tranche pas quand les deux camps sont à 3 : le score est impossible", () => {
     expect(decidedWinner({ home: 3, away: 3 })).toBe(null);
+  });
+});
+
+describe("plateau : 2 sets secs", () => {
+  test.each([
+    ["2-0", sets("25-20", "25-18"), [2, 0], "home"],
+    ["0-2", sets("20-25", "18-25"), [0, 2], "away"],
+    ["1-1, vainqueur aux points", sets("25-15", "23-25"), [1, 1], "home"],
+    ["1-1, vainqueur visiteur aux points", sets("25-23", "10-25"), [1, 1], "away"],
+    ["1-1 à égalité de points : match nul", sets("25-23", "23-25"), [1, 1], "draw"],
+    ["prolongation illimitée", sets("31-29", "25-20"), [2, 0], "home"],
+  ] as const)("%s", (_label, score, [homeSets, awaySets], winner) => {
+    const result = validateMatchScore([...score], "plateau");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect([result.outcome.homeSets, result.outcome.awaySets]).toEqual([homeSets, awaySets]);
+      expect(result.outcome.winner).toBe(winner);
+    }
+  });
+
+  test("les deux sets sont joués, même à 2-0", () => {
+    const result = validateMatchScore(sets("25-20"), "plateau");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("setCount");
+    }
+  });
+
+  test("pas de troisième set", () => {
+    const result = validateMatchScore(sets("25-20", "20-25", "15-10"), "plateau");
+    expect(result.ok).toBe(false);
+  });
+
+  test("pas de tie-break en 15 : le 2e set se joue en 25", () => {
+    const result = validateMatchScore(sets("25-20", "15-13"), "plateau");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toMatchObject({ code: "setUnfinished", setNumber: 2 });
+    }
+  });
+
+  test("l'écart de 2 points vaut aussi en plateau", () => {
+    const result = validateMatchScore(sets("25-24", "25-20"), "plateau");
+    expect(result.ok).toBe(false);
+  });
+
+  test("le forfait se joue sur 2 sets à 25-0", () => {
+    expect(forfeitScore("plateau")).toEqual(sets("25-0", "25-0"));
+    const result = validateMatchScore(forfeitScore("plateau"), "plateau");
+    expect(result.ok && result.outcome.winner).toBe("home");
+  });
+
+  test("l'issue affichée attend les deux sets", () => {
+    expect(decidedOutcome(sets("25-20"), "plateau")).toBe(null);
+    expect(decidedOutcome(sets("25-20", "20-25"), "plateau")).toBe("draw");
+    expect(decidedOutcome(sets("25-20", "18-25"), "plateau")).toBe("away");
+  });
+
+  test("le format standard n'admet jamais de nul", () => {
+    expect(decidedOutcome(sets("25-20", "20-25"))).toBe(null);
   });
 });

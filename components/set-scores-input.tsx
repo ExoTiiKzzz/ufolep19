@@ -5,10 +5,14 @@ import { Fragment } from "react";
 import { ClubLogo } from "@/components/club-logo";
 import { Input } from "@/components/ui/input";
 import {
-  decidedWinner,
+  decidedOutcome,
+  maxSets,
   REGULAR_SET_TARGET,
+  setLabel,
   setsWonSoFar,
   TIE_BREAK_TARGET,
+  type MatchFormat,
+  type MatchWinner,
 } from "@/lib/rules/score";
 import { cn } from "@/lib/utils";
 
@@ -25,14 +29,19 @@ export type ScoreColumnTeam = {
 
 type Side = "home" | "away";
 
-/** Cinq lignes vides : un match se joue au meilleur des 5 sets. */
-export function emptySetInputs(): SetInput[] {
-  return [0, 1, 2, 3, 4].map(() => ({ home: "", away: "" }));
+/**
+ * Lignes vides, une par set possible : cinq au meilleur des 5 sets, deux en plateau.
+ */
+export function emptySetInputs(format: MatchFormat = "standard"): SetInput[] {
+  return Array.from({ length: maxSets(format) }, () => ({ home: "", away: "" }));
 }
 
-/** Reprend une feuille déjà saisie sous forme de champs, complétée à 5 lignes. */
-export function setInputsFrom(sets: { home: number; away: number }[]): SetInput[] {
-  return emptySetInputs().map((empty, index) => {
+/** Reprend une feuille déjà saisie sous forme de champs, complétée au nombre de lignes. */
+export function setInputsFrom(
+  sets: { home: number; away: number }[],
+  format: MatchFormat = "standard",
+): SetInput[] {
+  return emptySetInputs(format).map((empty, index) => {
     const set = sets[index];
     return set === undefined ? empty : { home: String(set.home), away: String(set.away) };
   });
@@ -58,9 +67,12 @@ function scorableSets(sets: SetInput[]): { home: number; away: number }[] {
     .filter((set) => Number.isFinite(set.home) && Number.isFinite(set.away));
 }
 
-/** Teinte d'une colonne : verte pour le vainqueur, rouge pour le perdant, neutre avant. */
-function toneFor(decided: Side | null, side: Side): string {
-  if (decided === null) {
+/**
+ * Teinte d'une colonne : verte pour le vainqueur, rouge pour le perdant, neutre avant — et
+ * neutre pour un match nul, qui n'a ni vainqueur ni défaite.
+ */
+function toneFor(decided: MatchWinner | null, side: Side): string {
+  if (decided === null || decided === "draw") {
     return "border-transparent";
   }
   return decided === side
@@ -79,8 +91,9 @@ function toneFor(decided: Side | null, side: Side): string {
  *   La couleur ne porte pas seule : le compte de sets et le mot « vainqueur » ou
  *   « défaite » sont écrits sous le nom.
  *
- * Partagée par la saisie du receveur et par l'arbitrage d'un litige : ce sont les mêmes
- * champs, sur les mêmes règles.
+ * Partagée par la saisie du receveur, par l'arbitrage d'un litige et par la saisie d'un
+ * plateau : ce sont les mêmes champs. En plateau, deux lignes seulement, et l'issue tombe
+ * aux points à un set partout — ou au match nul.
  */
 export function SetScoresInput({
   home,
@@ -88,6 +101,7 @@ export function SetScoresInput({
   sets,
   onChange,
   idPrefix,
+  format = "standard",
 }: {
   home: ScoreColumnTeam;
   away: ScoreColumnTeam;
@@ -95,9 +109,11 @@ export function SetScoresInput({
   onChange: (next: SetInput[]) => void;
   /** Préfixe des `aria-label`, quand deux grilles coexistent sur une page. */
   idPrefix?: string;
+  format?: MatchFormat;
 }) {
-  const won = setsWonSoFar(scorableSets(sets));
-  const decided = decidedWinner(won);
+  const scorable = scorableSets(sets);
+  const won = setsWonSoFar(scorable);
+  const decided = decidedOutcome(scorable, format);
 
   const update = (index: number, side: Side, value: string) =>
     onChange(sets.map((set, position) => (position === index ? { ...set, [side]: value } : set)));
@@ -105,7 +121,13 @@ export function SetScoresInput({
   const header = (team: ScoreColumnTeam, side: Side) => {
     const count = won[side];
     const outcome =
-      decided === null ? null : decided === side ? "vainqueur" : "défaite";
+      decided === null
+        ? null
+        : decided === "draw"
+          ? "match nul"
+          : decided === side
+            ? "vainqueur"
+            : "défaite";
     return (
       <div
         className={cn(
@@ -159,7 +181,7 @@ export function SetScoresInput({
             {/* h-11 = la hauteur d'un champ (h-9) plus son py-1 : les lignes restent en face. */}
             <div className="flex h-11 items-center px-1 text-sm">
               <span className="text-muted-foreground">
-                {index === 4 ? "Tie-break" : `Set ${index + 1}`}
+                {setLabel(index, format)}
               </span>
             </div>
             {cell(index, home, "home")}
@@ -168,8 +190,19 @@ export function SetScoresInput({
         ))}
       </div>
       <p className="text-muted-foreground mt-2 text-xs">
-        Sets 1 à 4 en {REGULAR_SET_TARGET} points, tie-break en {TIE_BREAK_TARGET}, avec 2 points
-        d&apos;écart minimum et prolongation illimitée. Laissez vides les sets non joués.
+        {format === "plateau" ? (
+          <>
+            2 sets secs en {REGULAR_SET_TARGET} points, joués tous les deux, avec 2 points
+            d&apos;écart minimum et prolongation illimitée. À un set partout, le total de points
+            départage ; à égalité, le match est nul.
+          </>
+        ) : (
+          <>
+            Sets 1 à 4 en {REGULAR_SET_TARGET} points, tie-break en {TIE_BREAK_TARGET}, avec 2
+            points d&apos;écart minimum et prolongation illimitée. Laissez vides les sets non
+            joués.
+          </>
+        )}
       </p>
     </div>
   );

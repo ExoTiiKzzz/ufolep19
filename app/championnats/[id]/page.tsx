@@ -8,7 +8,7 @@ import { StandingsTable } from "@/components/standings-table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
-import { formatWindow } from "@/lib/format";
+import { formatPlateau, formatWindow } from "@/lib/format";
 
 export default function ChampionshipPage() {
   const championshipId = useParams<{ id: string }>().id as Id<"championships">;
@@ -26,7 +26,10 @@ export default function ChampionshipPage() {
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-10">
-      <p className="text-muted-foreground text-sm">Saison {championship.seasonLabel}</p>
+      <p className="text-muted-foreground text-sm">
+        Saison {championship.seasonLabel} · {championship.circuitName}
+        {championship.format === "plateau" ? " · plateaux en 2 sets secs" : ""}
+      </p>
       <h1 className="text-2xl font-semibold tracking-tight">{championship.name}</h1>
 
       <Card className="mt-8">
@@ -37,7 +40,7 @@ export default function ChampionshipPage() {
           {standings === undefined ? (
             <p className="text-muted-foreground text-sm">Chargement…</p>
           ) : (
-            <StandingsTable rows={standings} />
+            <StandingsTable rows={standings} format={championship.format} />
           )}
         </CardContent>
       </Card>
@@ -50,9 +53,11 @@ export default function ChampionshipPage() {
             <Card key={matchday._id}>
               <CardHeader>
                 <CardTitle className="text-base">
-                  Journée {matchday.number}
+                  {matchday.plateau === undefined ? "Journée" : "Plateau"} {matchday.number}
                   <span className="text-muted-foreground ml-2 text-sm font-normal">
-                    {formatWindow(matchday.windowStart, matchday.windowEnd)}
+                    {matchday.plateau === undefined
+                      ? formatWindow(matchday.windowStart, matchday.windowEnd)
+                      : formatPlateau(matchday.plateau)}
                   </span>
                 </CardTitle>
               </CardHeader>

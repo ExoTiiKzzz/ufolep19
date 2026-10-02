@@ -16,7 +16,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -27,6 +26,7 @@ import {
 } from "@/components/ui/table";
 import { api } from "@/convex/_generated/api";
 import { accountNotice } from "@/lib/account-notice";
+import { matchesPlayer } from "@/lib/rules/player-search";
 import type { Id } from "@/convex/_generated/dataModel";
 
 export default function TeamPage() {
@@ -39,14 +39,11 @@ export default function TeamPage() {
     team ? { championshipId: team.championshipId } : "skip",
   );
 
-  // Effectif, responsables et actions de gestion : réservés aux comptes connectés.
+  // Feuille verte, responsables et actions de gestion : réservés aux comptes connectés.
   const roster = useQuery(api.roster.listByTeam, account ? { teamId } : "skip");
   const managers = useQuery(api.teams.managers, account ? { teamId } : "skip");
   const myTeams = useQuery(api.teams.mine, account ? {} : "skip");
-  const clubPlayers = useQuery(
-    api.players.listByClub,
-    account && team ? { clubId: team.clubId } : "skip",
-  );
+  const candidates = useQuery(api.roster.candidates, account ? { teamId } : "skip");
   const previous = useQuery(api.roster.previousSeasonTeam, account ? { teamId } : "skip");
 
   const createPlayer = useAction(api.players.create);
@@ -56,13 +53,16 @@ export default function TeamPage() {
 
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [selected, setSelected] = useState("");
+  const [search, setSearch] = useState("");
 
   const canManage =
     account?.role === "admin" ||
     (myTeams ?? []).some((candidate) => candidate._id === teamId);
-  const rosterIds = new Set((roster ?? []).map((player) => String(player._id)));
-  const available = (clubPlayers ?? []).filter((player) => !rosterIds.has(String(player._id)));
+  // Recherche sur tous les licenciés du club, numéros périmés compris : on cherche avec la
+  // carte qu'on a sous les yeux.
+  const found = (candidates ?? []).filter(
+    (player) => !player.onThisTeam && search.trim() !== "" && matchesPlayer(player, search),
+  );
   const rank = (standings ?? []).find((row) => row.teamId === teamId);
 
   async function guard(action: () => Promise<unknown>) {
@@ -146,17 +146,17 @@ export default function TeamPage() {
 
       {account === null ? (
         <p className="text-muted-foreground mt-6 text-sm">
-          L&apos;effectif et les responsables de l&apos;équipe ne sont visibles qu&apos;avec un
+          La feuille verte et les responsables de l&apos;équipe ne sont visibles qu&apos;avec un
           compte.
         </p>
       ) : (
         <>
           <Card className="mt-6">
             <CardHeader>
-              <CardTitle className="text-base">Effectif</CardTitle>
+              <CardTitle className="text-base">Feuille verte</CardTitle>
               <CardDescription>
                 {(roster ?? []).length} joueur(s). Aucun minimum : jouer en sous-effectif est
-                permis.
+                permis. Un licencié n&apos;a qu&apos;une feuille verte par circuit.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -197,7 +197,7 @@ export default function TeamPage() {
                 </TableBody>
               </Table>
               {(roster ?? []).length === 0 ? (
-                <p className="text-muted-foreground text-sm">Effectif vide.</p>
+                <p className="text-muted-foreground text-sm">Feuille verte vide.</p>
               ) : null}
             </CardContent>
           </Card>
@@ -229,16 +229,32 @@ export default function TeamPage() {
           {previous === undefined || previous === null ? null : (
             <Card className="mt-6">
               <CardHeader>
-                <CardTitle className="text-base">Reprendre l&apos;effectif précédent</CardTitle>
+                <CardTitle className="text-base">
+                  Reprendre la feuille verte précédente
+                </CardTitle>
                 <CardDescription>
                   La même équipe existait en {previous.seasonLabel} avec {previous.playerCount}{" "}
-                  joueurs. La reprise n&apos;introduit aucun doublon si vous la relancez.
+                  joueurs. La reprise n&apos;introduit aucun doublon si vous la relancez, et laisse
+                  de côté qui figure déjà sur une autre feuille verte du circuit.
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <Button
                   variant="outline"
-                  onClick={() => guard(() => copyRoster({ teamId, sourceTeamId: previous._id }))}
+                  onClick={() =>
+                    guard(async () => {
+                      const { added, skipped } = await copyRoster({
+                        teamId,
+                        sourceTeamId: previous._id,
+                      });
+                      setNotice(
+                        `${added} joueur(s) repris.` +
+                          (skipped.length === 0
+                            ? ""
+                            : ` Laissés de côté, déjà sur une autre feuille verte : ${skipped.join(", ")}.`),
+                      );
+                    })
+                  }
                 >
                   Reprendre les {previous.playerCount} joueurs
                 </Button>
@@ -246,42 +262,57 @@ export default function TeamPage() {
             </Card>
           )}
 
-          {available.length === 0 ? null : (
-            <Card className="mt-6">
-              <CardHeader>
-                <CardTitle className="text-base">Ajouter un licencié du club</CardTitle>
-              </CardHeader>
-              <CardContent className="flex flex-wrap items-end gap-3">
-                <div className="min-w-56 flex-1">
-                  <Label htmlFor="player">Licencié</Label>
-                  <Select
-                    id="player"
-                    className="mt-2"
-                    value={selected}
-                    onChange={(event) => setSelected(event.target.value)}
-                  >
-                    <option value="">Choisir…</option>
-                    {available.map((player) => (
-                      <option key={player._id} value={player._id}>
+          <Card className="mt-6">
+            <CardHeader>
+              <CardTitle className="text-base">Inscrire un licencié du club</CardTitle>
+              <CardDescription>
+                Cherchez par nom ou par numéro de licence, même périmé. Un licencié déjà inscrit
+                sur une autre feuille verte du circuit doit d&apos;abord en être retiré.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3">
+              <Input
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Nom, prénom ou numéro de licence"
+                aria-label="Chercher un licencié du club"
+              />
+              {search.trim() === "" ? null : found.length === 0 ? (
+                <p className="text-muted-foreground text-sm">Aucun licencié du club trouvé.</p>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  {found.map((player) => (
+                    <div key={player._id} className="flex flex-wrap items-center gap-2 text-sm">
+                      <span className="font-medium">
                         {player.lastName.toUpperCase()} {player.firstName}
-                      </option>
-                    ))}
-                  </Select>
+                      </span>
+                      <LicenseBadge license={player.license} />
+                      {player.otherTeamName === null ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="ml-auto"
+                          onClick={() =>
+                            guard(async () => {
+                              await addToRoster({ teamId, playerId: player._id });
+                              setSearch("");
+                            })
+                          }
+                        >
+                          Inscrire
+                        </Button>
+                      ) : (
+                        <Badge variant="muted" className="ml-auto">
+                          déjà sur la feuille verte de {player.otherTeamName}
+                        </Badge>
+                      )}
+                    </div>
+                  ))}
                 </div>
-                <Button
-                  disabled={selected === ""}
-                  onClick={() =>
-                    guard(async () => {
-                      await addToRoster({ teamId, playerId: selected as Id<"players"> });
-                      setSelected("");
-                    })
-                  }
-                >
-                  Ajouter à l&apos;effectif
-                </Button>
-              </CardContent>
-            </Card>
-          )}
+              )}
+            </CardContent>
+          </Card>
 
           <Card className="mt-6">
             <CardHeader>
@@ -313,7 +344,7 @@ export default function TeamPage() {
                     await addToRoster({ teamId, playerId });
                     element.reset();
                     setNotice(
-                      accountNotice("Joueur créé et ajouté à l'effectif.", account),
+                      accountNotice("Joueur créé et inscrit sur la feuille verte.", account),
                     );
                   });
                 }}

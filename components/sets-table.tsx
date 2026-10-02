@@ -6,7 +6,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { decidedWinner, setsWonSoFar, TIE_BREAK_TARGET, type SetScore } from "@/lib/rules/score";
+import {
+  decidedOutcome,
+  setsWonSoFar,
+  TIE_BREAK_TARGET,
+  type MatchFormat,
+  type SetScore,
+} from "@/lib/rules/score";
 import { cn } from "@/lib/utils";
 
 /**
@@ -15,29 +21,32 @@ import { cn } from "@/lib/utils";
  * Le gagnant de chaque set est mis en gras, et la dernière colonne rappelle le nombre de
  * sets gagnés — ce qui évite de recompter la ligne pour retrouver le score du match.
  *
- * Dès qu'une équipe atteint 3 sets, sa ligne passe au **vert** et l'autre au **rouge**,
- * comme les colonnes de la grille de saisie : c'est le même score, lu deux fois. La
- * colonne « Sets » reste le repère qui ne dépend pas de la couleur.
+ * Dès qu'une équipe a gagné, sa ligne passe au **vert** et l'autre au **rouge**, comme les
+ * colonnes de la grille de saisie : c'est le même score, lu deux fois. La colonne « Sets »
+ * reste le repère qui ne dépend pas de la couleur. Un match nul de plateau reste neutre,
+ * et le dit en toutes lettres.
  */
 export function SetsTable({
   homeTeamName,
   awayTeamName,
   sets,
+  format = "standard",
 }: {
   homeTeamName: string;
   awayTeamName: string;
   sets: SetScore[];
+  format?: MatchFormat;
 }) {
   if (sets.length === 0) {
     return <p className="text-muted-foreground text-sm">Aucun set saisi.</p>;
   }
 
   const won = setsWonSoFar(sets);
-  const decided = decidedWinner(won);
+  const decided = decidedOutcome(sets, format);
 
   /** Teinte d'une ligne. `hover:` est réaffirmé, sans quoi le survol effacerait la teinte. */
   const tone = (side: "home" | "away") => {
-    if (decided === null) {
+    if (decided === null || decided === "draw") {
       return null;
     }
     return decided === side
@@ -66,15 +75,29 @@ export function SetsTable({
     </TableRow>
   );
 
+  const points = sets.reduce(
+    (total, set) => ({ home: total.home + set.home, away: total.away + set.away }),
+    { home: 0, away: 0 },
+  );
+  // À un set partout, le plateau se décide aux points : le dire, puisque la colonne « Sets »
+  // affiche une égalité.
+  const caption =
+    format !== "plateau" || won.home !== won.away || decided === null
+      ? null
+      : decided === "draw"
+        ? `Match nul : un set partout, ${points.home} points partout.`
+        : `Un set partout, vainqueur aux points (${points.home} à ${points.away}).`;
+
   return (
+    <>
     <Table>
       <TableHeader>
         <TableRow>
           <TableHead>Équipe</TableHead>
           {sets.map((_, index) => (
             <TableHead key={index} className="text-right">
-              {/* Le 5e set est le tie-break : sa cible n'est pas la même. */}
-              {index === 4 ? `TB (${TIE_BREAK_TARGET})` : `Set ${index + 1}`}
+              {/* Le 5e set standard est le tie-break : sa cible n'est pas la même. */}
+              {format === "standard" && index === 4 ? `TB (${TIE_BREAK_TARGET})` : `Set ${index + 1}`}
             </TableHead>
           ))}
           <TableHead className="border-l text-right">Sets</TableHead>
@@ -85,5 +108,7 @@ export function SetsTable({
         {row("away", awayTeamName, (set) => set.away, (set) => set.home, won.away)}
       </TableBody>
     </Table>
+    {caption === null ? null : <p className="text-muted-foreground mt-2 text-sm">{caption}</p>}
+    </>
   );
 }
