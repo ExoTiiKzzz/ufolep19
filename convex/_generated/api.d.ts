@@ -16,6 +16,7 @@ import type * as championships from "../championships.js";
 import type * as circuits from "../circuits.js";
 import type * as clubs from "../clubs.js";
 import type * as http from "../http.js";
+import type * as imports from "../imports.js";
 import type * as licenses from "../licenses.js";
 import type * as mail from "../mail.js";
 import type * as matchdays from "../matchdays.js";
@@ -46,6 +47,7 @@ declare const fullApi: ApiFromModules<{
   circuits: typeof circuits;
   clubs: typeof clubs;
   http: typeof http;
+  imports: typeof imports;
   licenses: typeof licenses;
   mail: typeof mail;
   matchdays: typeof matchdays;
