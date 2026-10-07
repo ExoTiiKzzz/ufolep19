@@ -274,6 +274,15 @@ numéro ou à un autre, et la précédente reste dans l'historique avec ses date
 - Un numéro ne peut pas être porté par **deux joueurs différents**. Le même joueur peut en
   revanche le reprendre d'une saison sur l'autre : une reconduction au même numéro n'est pas un
   doublon.
+- Un numéro est **alphanumérique** : il porte des lettres autant que des chiffres. Rien ne borne
+  sa forme — pas de longueur imposée, pas de motif — parce que la fédération en change et qu'un
+  format refusé à la saisie empêche d'enregistrer une carte pourtant valide.
+
+La casse, en revanche, ne distingue rien : `ab1234` et `AB1234` sont la même carte. Les numéros
+sont donc **rangés en majuscules** par `normalizeLicenseNumber`, par où passent toutes les
+écritures. C'est une normalisation à l'écriture et non une comparaison sans casse à la lecture,
+pour que l'index `by_number` reste utilisable — l'unicité se vérifie par égalité exacte, et sans
+ça la même licence saisie différemment par deux clubs passerait pour deux numéros.
 
 **La validité se juge à la date du match, jamais à celle de la saisie.** Une feuille transcrite
 trois jours plus tard ne peut pas rejeter un joueur régulièrement licencié le jour où il a joué ;
@@ -308,8 +317,8 @@ Un forfait est **prononcé par un administrateur** — jamais déduit automatiqu
 d'une composition. Il termine le match sur un score conventionnel :
 
 - **3-0 en sets**, chaque set à **25-0** (donc 75-0 en points marqués) — **2-0** en plateau ;
-- **0 point de classement** pour l'équipe défaillante, le barème normal s'appliquant au vainqueur
-  (3 points).
+- **0 point de classement** pour l'équipe défaillante au premier forfait, puis une pénalité
+  croissante (voir « Classement ») ; le vainqueur marque ses 3 points de victoire.
 
 ## Classement
 
@@ -318,14 +327,32 @@ Un classement est calculé **par championnat**, dérivé des matchs terminés (j
 gagnés/perdus, points marqués/encaissés, et le total de points de classement. La colonne des nuls
 n'est affichée qu'au format plateau.
 
-Barème standard :
+Barème standard, propre à l'UFOLEP 19 — **ce n'est pas celui de la FIVB**, et il ne doit pas y
+être ramené :
 
 | Résultat | Points |
 | --- | --- |
-| Victoire 3-0 ou 3-1 | **3** |
-| Victoire 3-2 | **2** |
-| Défaite 2-3 | **1** |
-| Défaite 0-3 ou 1-3 | **0** |
+| Victoire, quel qu'en soit le score | **3** |
+| Défaite 2-3 | **2** |
+| Toute autre défaite | **1** |
+| Forfait | **0** |
+| 2ème forfait | **-1** |
+| 3ème forfait et au-delà | **-2** |
+
+Deux choses s'y lisent. **Toute victoire vaut pareil** : gagner 3-0 ou 3-2 ne change rien.
+Et **une défaite rapporte toujours quelque chose** — l'équipe s'est déplacée et a joué ; c'est
+le forfait, et lui seul, qui ne rapporte rien. La défaite en cinq sets vaut un point de plus
+parce qu'elle s'est jouée à un set près.
+
+Le forfait est donc le seul résultat qui **retire** des points, et sa pénalité s'aggrave d'un
+forfait à l'autre. Elle plafonne à -2 : au-delà, le classement a déjà dit ce qu'il avait à dire.
+Chaque forfait porte sa propre valeur et elles s'additionnent — trois forfaits font
+`0 + (-1) + (-2) = -3`, et un total de points **peut être négatif**.
+
+Le total ne dépend que du **nombre** de forfaits d'une équipe, jamais de leur ordre : les
+valeurs étant attribuées par rang, la somme est la même quel que soit l'ordre de lecture des
+matchs. C'est ce qui dispense `computeStandings` de trier par date, et un test protège cette
+propriété — sans elle, le calcul dépendrait d'un ordre que rien ne garantit.
 
 Barème plateau — **provisoire**, en attente de confirmation par l'UFOLEP 19 :
 
@@ -336,6 +363,8 @@ Barème plateau — **provisoire**, en attente de confirmation par l'UFOLEP 19 :
 | Match nul (1-1, points égaux) | **1** |
 | Défaite 1-1 aux points | **1** |
 | Défaite 0-2 | **0** |
+
+Le forfait y garde la même pénalité croissante qu'au format standard.
 
 La Coupe de Corrèze se joue pour l'instant comme un championnat standard, dans son propre
 circuit, avec le classement classique — en attente de son règlement.
@@ -514,6 +543,19 @@ Deux points qui découlent des règles de palette :
 
 Le compte vient de `matches.myTodoCount`, qui partage son classement avec `matches.myTodo` —
 les deux nombres ne peuvent pas diverger, et un test le vérifie.
+
+**Tableau de bord : deux rattachements, pas un.** La carte « À traiter » et le compteur partent des
+équipes **gérées** (`teamManagers`) ; « Mon calendrier » et « Mes équipes » partent des équipes
+**rattachées** — celles qu'on gère *et* celles dont la fiche Joueur du compte fait partie
+(`rosterEntries` sur `users.playerId`). Sans cette seconde liste, un compte `player` n'aurait
+strictement rien à l'écran, alors que son rôle est justement de consulter ses équipes, son
+calendrier et ses résultats.
+
+Les deux listes vivent dans `convex/authz.ts` sous deux noms distincts — `managedTeamIds` et
+`attachedTeamIds` — et ce n'est pas de la cosmétique : substituer la seconde à la première dans un
+chemin d'écriture donnerait à n'importe quel licencié la main sur la feuille de match de son
+équipe. Un test vérifie qu'un compte à l'effectif d'une équipe dont un match attend un créneau a
+bien un `myTodo` vide et un compteur à zéro.
 
 **Page d'accueil** : elle montre un championnat par défaut — le premier de la saison courante — avec
 son classement, puis la journée en cours, ou la prochaine si aucune fenêtre n'est ouverte, ou la

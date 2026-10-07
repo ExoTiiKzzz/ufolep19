@@ -218,6 +218,40 @@ test("un numéro déjà attribué à un autre licencié est refusé, en le nomma
   ).rejects.toThrow(/Le numéro de licence UNIQUE-1 est déjà attribué à Joueuse1 Nom1\./);
 });
 
+test("un numéro alphanumérique ne se dédouble pas sur la casse", async () => {
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+  const { home } = await seedBothRosters(t, s);
+  const asManager = t.withIdentity({ subject: s.homeManager });
+
+  await asManager.mutation(api.licenses.add, {
+    playerId: home[0],
+    number: "  ab-1234-cd  ",
+    validFrom: parisWallClock(2026, 9, 1),
+    validUntil: parisWallClock(2027, 8, 31),
+  });
+
+  // Rangé en majuscules, espaces rognés : un numéro porte des lettres, mais la casse n'y
+  // distingue rien, et l'écran doit montrer partout la même chose.
+  expect(
+    (await asManager.query(api.licenses.listByPlayer, { playerId: home[0] })).map(
+      (row) => row.number,
+    ),
+  ).toContain("AB-1234-CD");
+
+  // La même carte, saisie autrement pour quelqu'un d'autre, est bien refusée. Sans
+  // normalisation à l'écriture, l'égalité exacte de l'index `by_number` laisserait passer
+  // le doublon et l'invariant « un numéro, un seul licencié » tomberait sans bruit.
+  await expect(
+    asManager.mutation(api.licenses.add, {
+      playerId: home[1],
+      number: "AB-1234-CD",
+      validFrom: parisWallClock(2026, 9, 1),
+      validUntil: parisWallClock(2027, 8, 31),
+    }),
+  ).rejects.toThrow(/déjà attribué à Joueuse1 Nom1/);
+});
+
 test("la gestion des licences est réservée aux responsables du club", async () => {
   const t = convexTest(schema, modules);
   const s = await setupChampionship(t);

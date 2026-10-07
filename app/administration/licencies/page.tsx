@@ -172,6 +172,25 @@ export default function LicenseesPage() {
       <Card className="mt-6">
         <CardHeader>
           <CardTitle className="text-base">Fiches</CardTitle>
+          {/*
+           * La colonne « Équipes » ne montre qu'une saison : autrement un licencié de longue
+           * date y empilerait le même nom d'équipe une fois par an. Le dire ici plutôt que
+           * dans l'en-tête de colonne, qui n'a pas la place d'expliquer où est le reste.
+           */}
+          <CardDescription>
+            {result === undefined ? null : result.seasonLabel === null ? (
+              <>
+                Aucune saison courante : la colonne « Équipes » reste vide. L&apos;effectif est
+                une donnée de saison.
+              </>
+            ) : (
+              <>
+                La colonne « Équipes » ne montre que les engagements de la saison{" "}
+                {result.seasonLabel} : l&apos;effectif est une donnée de saison. L&apos;historique
+                complet est sur la fiche du licencié.
+              </>
+            )}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <Table>

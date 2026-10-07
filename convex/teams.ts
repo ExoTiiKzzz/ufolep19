@@ -2,7 +2,7 @@ import { ConvexError, v } from "convex/values";
 
 import { mutation, query } from "./_generated/server";
 import { matchSummary, newTeamCache, summarize } from "./matches";
-import { managedTeamIds, requireAdmin, requireUser } from "./authz";
+import { attachedTeamIds, managedTeamIds, requireAdmin, requireUser } from "./authz";
 
 const team = v.object({
   _id: v.id("teams"),
@@ -130,7 +130,17 @@ export const managers = query({
   },
 });
 
-/** Les équipes gérées par le compte connecté. */
+/**
+ * Les équipes rattachées au compte connecté.
+ *
+ * Deux rattachements y mènent : **gérer** l'équipe, et **en faire partie** — un compte de
+ * rôle `player` voit ainsi les équipes de sa fiche. Ce n'est qu'une liste d'affichage :
+ * `managerOf` dit lequel des deux rattachements ouvre des droits, et il est le seul à faire
+ * autorité côté écriture.
+ *
+ * La saison courante passe devant : un licencié qui traverse les saisons accumule des
+ * équipes, et celle de l'an dernier n'est pas ce qu'il vient chercher.
+ */
 export const mine = query({
   args: {},
   returns: v.array(
@@ -141,13 +151,16 @@ export const mine = query({
       championshipId: v.id("championships"),
       championshipName: v.string(),
       seasonLabel: v.string(),
+      isCurrentSeason: v.boolean(),
+      managerOf: v.boolean(),
     }),
   ),
   handler: async (ctx) => {
     const user = await requireUser(ctx);
-    const teamIds = await managedTeamIds(ctx, user._id);
+    const managed = new Set((await managedTeamIds(ctx, user._id)).map(String));
+    const teamIds = await attachedTeamIds(ctx, user);
     const teams = await Promise.all(teamIds.map((teamId) => ctx.db.get(teamId)));
-    return await Promise.all(
+    const rows = await Promise.all(
       teams
         .filter((team): team is NonNullable<typeof team> => team !== null)
         .map(async (team) => {
@@ -160,8 +173,16 @@ export const mine = query({
             championshipId: team.championshipId,
             championshipName: championship?.name ?? "",
             seasonLabel: season?.label ?? "",
+            isCurrentSeason: season?.isCurrent ?? false,
+            managerOf: managed.has(String(team._id)),
           };
         }),
+    );
+    return rows.sort(
+      (a, b) =>
+        Number(b.isCurrentSeason) - Number(a.isCurrentSeason) ||
+        b.seasonLabel.localeCompare(a.seasonLabel) ||
+        a.name.localeCompare(b.name),
     );
   },
 });

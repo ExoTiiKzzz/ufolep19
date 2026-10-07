@@ -46,6 +46,50 @@ export async function managedTeamIds(ctx: Ctx, userId: Id<"users">): Promise<Id<
 }
 
 /**
+ * Les équipes dont le compte fait partie **à l'effectif**, via la fiche Joueur qu'il porte.
+ *
+ * Vide pour un compte sans `playerId` : la plupart des licenciés n'ont pas de compte, et la
+ * plupart des comptes ne sont pas des licenciés.
+ */
+export async function rosterTeamIds(ctx: Ctx, user: Doc<"users">): Promise<Id<"teams">[]> {
+  const playerId = user.playerId;
+  if (playerId === undefined) {
+    return [];
+  }
+  const rows = await ctx.db
+    .query("rosterEntries")
+    .withIndex("by_player", (q) => q.eq("playerId", playerId))
+    .collect();
+  return rows.map((row) => row.teamId);
+}
+
+/**
+ * Les équipes qu'un compte **voit comme siennes** : celles qu'il gère, et celles dont sa
+ * fiche fait partie.
+ *
+ * À ne jamais substituer à `managedTeamIds` dans un chemin d'écriture. Les deux listes
+ * répondent à deux questions distinctes — *ce que je vois* et *ce sur quoi j'agis* — et les
+ * confondre donnerait à un licencié la main sur la feuille de match de son équipe. C'est
+ * précisément la confusion que le modèle tient à distance en séparant la fiche Joueur du
+ * compte de rôle `player`.
+ */
+export async function attachedTeamIds(ctx: Ctx, user: Doc<"users">): Promise<Id<"teams">[]> {
+  const seen = new Set<string>();
+  const teamIds: Id<"teams">[] = [];
+  for (const teamId of [
+    ...(await managedTeamIds(ctx, user._id)),
+    ...(await rosterTeamIds(ctx, user)),
+  ]) {
+    // Un responsable peut aussi figurer à l'effectif de son équipe : il ne la voit qu'une fois.
+    if (!seen.has(teamId)) {
+      seen.add(teamId);
+      teamIds.push(teamId);
+    }
+  }
+  return teamIds;
+}
+
+/**
  * Le compte appelant s'il gère cette équipe, ou s'il est administrateur.
  *
  * Les droits d'un responsable viennent de son **rattachement d'équipe**, jamais du seul

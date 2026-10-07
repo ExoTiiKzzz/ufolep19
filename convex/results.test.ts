@@ -56,16 +56,17 @@ test("seuls les matchs terminés entrent au classement", async () => {
   expect(before.map((row) => row.rank)).toEqual([1, 1]);
 });
 
-test("un match terminé 3-1 donne 3 points au vainqueur et 0 au perdant", async () => {
+test("un match terminé 3-1 donne 3 points au vainqueur et 1 au perdant", async () => {
   const t = convexTest(schema, modules);
   const { s } = await completedMatch(t);
 
   const standings = await t.query(api.standings.byChampionship, {
     championshipId: s.championshipId,
   });
+  // Le perdant marque : il s'est déplacé et a joué. Seul le forfait ne rapporte rien.
   expect(standings.map((row) => [row.teamName, row.points, row.rank])).toEqual([
     ["Club A 1", 3, 1],
-    ["Club B 1", 0, 2],
+    ["Club B 1", 1, 2],
   ]);
   expect(standings[0]).toMatchObject({
     played: 1,
@@ -77,7 +78,7 @@ test("un match terminé 3-1 donne 3 points au vainqueur et 0 au perdant", async 
   });
 });
 
-test("un forfait entre au classement comme un 3-0, sans cas particulier", async () => {
+test("un forfait ne rapporte rien, là où une défaite jouée rapporterait 1 point", async () => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date(SLOT_AT - 7 * 86_400_000));
   const t = convexTest(schema, modules);
@@ -90,9 +91,42 @@ test("un forfait entre au classement comme un 3-0, sans cas particulier", async 
   const standings = await t.query(api.standings.byChampionship, {
     championshipId: s.championshipId,
   });
-  expect(standings.map((row) => [row.teamName, row.points, row.setsWon, row.pointsFor])).toEqual([
-    ["Club A 1", 3, 3, 75],
-    ["Club B 1", 0, 0, 0],
+  // Le score conventionnel ressemble à une défaite 0-3, et compte comme telle dans les sets
+  // et les points marqués — c'est ce qui garde les ratios de départage comparables. Mais le
+  // barème ne s'y trompe pas : 0 point, et non le point d'une défaite sèche.
+  expect(
+    standings.map((row) => [row.teamName, row.points, row.forfeits, row.setsWon, row.pointsFor]),
+  ).toEqual([
+    ["Club A 1", 3, 0, 3, 75],
+    ["Club B 1", 0, 1, 0, 0],
+  ]);
+});
+
+test("un deuxième forfait retire un point et fait passer le total sous zéro", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(SLOT_AT - 7 * 86_400_000));
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+  const asAdmin = t.withIdentity({ subject: s.admin });
+
+  // Une seconde rencontre entre les deux mêmes équipes : le calendrier est saisi à la main
+  // et n'interdit pas l'affiche en double, il la signale seulement.
+  const { matchId: second } = await asAdmin.mutation(api.matches.create, {
+    matchdayId: s.matchdayId,
+    homeTeamId: s.homeTeamId,
+    awayTeamId: s.awayTeamId,
+  });
+  for (const matchId of [s.matchId, second]) {
+    await asAdmin.mutation(api.sheets.forfeit, { matchId, forfeitingTeamId: s.awayTeamId });
+  }
+
+  const standings = await t.query(api.standings.byChampionship, {
+    championshipId: s.championshipId,
+  });
+  // 0 pour le premier forfait, -1 pour le second.
+  expect(standings.map((row) => [row.teamName, row.points, row.forfeits])).toEqual([
+    ["Club A 1", 6, 0],
+    ["Club B 1", -1, 2],
   ]);
 });
 
