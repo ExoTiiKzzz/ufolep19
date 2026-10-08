@@ -1,7 +1,8 @@
 "use client";
 
 import { useAction, useMutation, useQuery } from "convex/react";
-import { useState } from "react";
+import { KeyRound, Trash2 } from "lucide-react";
+import { Fragment, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tooltip } from "@/components/ui/tooltip";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { accountNotice } from "@/lib/account-notice";
@@ -60,7 +62,7 @@ export default function AccountsPage() {
   }
 
   return (
-    <main className="mx-auto max-w-4xl px-6 py-10">
+    <main className="mx-auto max-w-5xl px-6 py-10">
       <h1 className="text-2xl font-semibold tracking-tight">Comptes et rôles</h1>
       <p className="text-muted-foreground mt-2 text-sm">
         Il n&apos;y a pas d&apos;inscription en ligne : tous les comptes sont créés ici. Un
@@ -130,127 +132,149 @@ export default function AccountsPage() {
                 <TableHead>E-mail</TableHead>
                 <TableHead>Rôle</TableHead>
                 <TableHead>Équipes gérées</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {(accounts ?? []).map((row) => (
-                <TableRow key={row._id}>
-                  <TableCell className="font-medium">{row.name ?? "—"}</TableCell>
-                  <TableCell>
-                    <span className="text-muted-foreground">{row.email ?? "—"}</span>
-                    {pending?.userId !== row._id ? (
-                      <div className="-ml-3 flex flex-wrap">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => setPending({ userId: row._id, action: "reset" })}
-                        >
-                          Nouveau mot de passe
-                        </Button>
-                        {row._id === me?._id ? null : (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => setPending({ userId: row._id, action: "remove" })}
-                          >
-                            Supprimer
-                          </Button>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="mt-1 flex flex-col gap-2">
-                        <p className="text-xs">
-                          {pending.action === "reset"
-                            ? "L'actuel mot de passe cessera de fonctionner et ses sessions seront fermées."
-                            : "Plus aucune connexion, adresse libérée. Son nom reste dans l'historique des matchs."}
-                        </p>
-                        <div className="flex gap-1">
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            onClick={() =>
-                              guard(async () => {
-                                setPending(null);
-                                if (pending.action === "reset") {
-                                  const account = await resetPassword({ userId: row._id });
-                                  setNotice(
-                                    accountNotice(
-                                      `Nouveau mot de passe attribué à ${row.name ?? account.email}.`,
-                                      account,
-                                      "account",
-                                    ),
-                                  );
-                                } else {
-                                  await removeAccount({ userId: row._id });
-                                  setNotice(`Compte de ${row.name ?? row.email} supprimé.`);
-                                }
-                              })
+                <Fragment key={row._id}>
+                  <TableRow>
+                    <TableCell className="font-medium">{row.name ?? "—"}</TableCell>
+                    <TableCell className="text-muted-foreground">{row.email ?? "—"}</TableCell>
+                    <TableCell>
+                      <Select
+                        className="min-w-36"
+                        value={row.role}
+                        onChange={(event) =>
+                          guard(
+                            () =>
+                              setRole({ userId: row._id, role: event.target.value as Role }),
+                            "Rôle modifié.",
+                          )
+                        }
+                      >
+                        <option value="player">{roleLabels.player}</option>
+                        <option value="manager">{roleLabels.manager}</option>
+                        <option value="admin">{roleLabels.admin}</option>
+                      </Select>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {row.managedTeams.map((team) => (
+                          <Badge key={team._id} variant="muted">
+                            {team.name}
+                            <button
+                              type="button"
+                              className="ml-1 cursor-pointer"
+                              aria-label={`Détacher ${team.name}`}
+                              onClick={() =>
+                                guard(
+                                  () => removeManager({ teamId: team._id, userId: row._id }),
+                                  "Équipe détachée.",
+                                )
+                              }
+                            >
+                              ×
+                            </button>
+                          </Badge>
+                        ))}
+                        {row.role === "player" ? null : (
+                          <SeasonTeamPicker
+                            value={attachTo[row._id] ?? ""}
+                            onChange={(value) =>
+                              setAttachTo((previous) => ({ ...previous, [row._id]: value }))
                             }
-                          >
-                            {pending.action === "reset" ? "Confirmer" : "Supprimer"}
-                          </Button>
-                          <Button size="sm" variant="ghost" onClick={() => setPending(null)}>
-                            Annuler
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Select
-                      className="min-w-36"
-                      value={row.role}
-                      onChange={(event) =>
-                        guard(
-                          () =>
-                            setRole({ userId: row._id, role: event.target.value as Role }),
-                          "Rôle modifié.",
-                        )
-                      }
-                    >
-                      <option value="player">{roleLabels.player}</option>
-                      <option value="manager">{roleLabels.manager}</option>
-                      <option value="admin">{roleLabels.admin}</option>
-                    </Select>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap items-center gap-2">
-                      {row.managedTeams.map((team) => (
-                        <Badge key={team._id} variant="muted">
-                          {team.name}
-                          <button
-                            type="button"
-                            className="ml-1 cursor-pointer"
-                            aria-label={`Détacher ${team.name}`}
-                            onClick={() =>
+                            teams={seasonTeams ?? []}
+                            onAttach={(teamId) =>
                               guard(
-                                () => removeManager({ teamId: team._id, userId: row._id }),
-                                "Équipe détachée.",
+                                () => addManager({ teamId, userId: row._id }),
+                                "Équipe rattachée.",
                               )
                             }
+                          />
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex justify-end gap-1">
+                        <Tooltip label="Nouveau mot de passe" align="end">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            aria-label={`Nouveau mot de passe pour ${row.name ?? row.email}`}
+                            aria-pressed={pending?.userId === row._id && pending.action === "reset"}
+                            onClick={() => setPending({ userId: row._id, action: "reset" })}
                           >
-                            ×
-                          </button>
-                        </Badge>
-                      ))}
-                      {row.role === "player" ? null : (
-                        <SeasonTeamPicker
-                          value={attachTo[row._id] ?? ""}
-                          onChange={(value) =>
-                            setAttachTo((previous) => ({ ...previous, [row._id]: value }))
-                          }
-                          teams={seasonTeams ?? []}
-                          onAttach={(teamId) =>
-                            guard(
-                              () => addManager({ teamId, userId: row._id }),
-                              "Équipe rattachée.",
-                            )
-                          }
-                        />
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
+                            <KeyRound className="size-4" />
+                          </Button>
+                        </Tooltip>
+                        {row._id === me?._id ? (
+                          // Pas de suppression de son propre compte : l'emplacement reste,
+                          // pour que les icônes restent alignées d'une ligne à l'autre.
+                          <span className="size-8" />
+                        ) : (
+                          <Tooltip label="Supprimer le compte" align="end">
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              aria-label={`Supprimer le compte de ${row.name ?? row.email}`}
+                              aria-pressed={
+                                pending?.userId === row._id && pending.action === "remove"
+                              }
+                              onClick={() => setPending({ userId: row._id, action: "remove" })}
+                            >
+                              <Trash2 className="size-4" />
+                            </Button>
+                          </Tooltip>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                  {pending?.userId !== row._id ? null : (
+                    // Confirmation sur une ligne à part : réinitialiser ou supprimer coupe l'accès
+                    // de quelqu'un, et la colonne d'icônes n'a pas la place de l'expliquer.
+                    <TableRow className="bg-muted/50">
+                      <TableCell colSpan={5}>
+                        <div className="flex flex-wrap items-center justify-end gap-3">
+                          <p className="text-sm">
+                            {pending.action === "reset"
+                              ? `Attribuer un nouveau mot de passe à ${row.name ?? row.email} ? L'actuel cessera de fonctionner et ses sessions seront fermées.`
+                              : `Supprimer le compte de ${row.name ?? row.email} ? Plus aucune connexion, adresse libérée ; son nom reste dans l'historique des matchs.`}
+                          </p>
+                          <div className="flex gap-1">
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() =>
+                                guard(async () => {
+                                  setPending(null);
+                                  if (pending.action === "reset") {
+                                    const account = await resetPassword({ userId: row._id });
+                                    setNotice(
+                                      accountNotice(
+                                        `Nouveau mot de passe attribué à ${row.name ?? account.email}.`,
+                                        account,
+                                        "account",
+                                      ),
+                                    );
+                                  } else {
+                                    await removeAccount({ userId: row._id });
+                                    setNotice(`Compte de ${row.name ?? row.email} supprimé.`);
+                                  }
+                                })
+                              }
+                            >
+                              {pending.action === "reset" ? "Confirmer" : "Supprimer"}
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => setPending(null)}>
+                              Annuler
+                            </Button>
+                          </div>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </Fragment>
               ))}
             </TableBody>
           </Table>
