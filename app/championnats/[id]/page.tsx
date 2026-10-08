@@ -3,12 +3,14 @@
 import { useQuery } from "convex/react";
 import { useParams } from "next/navigation";
 
+import { BracketStandings } from "@/components/bracket-standings";
 import { MatchRow } from "@/components/match-row";
 import { StandingsTable } from "@/components/standings-table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { formatPlateau, formatWindow } from "@/lib/format";
+import { matchdayNoun } from "@/lib/labels";
 
 export default function ChampionshipPage() {
   const championshipId = useParams<{ id: string }>().id as Id<"championships">;
@@ -16,6 +18,8 @@ export default function ChampionshipPage() {
   const matchdays = useQuery(api.matchdays.listByChampionship, { championshipId });
   const matches = useQuery(api.matches.listByChampionship, { championshipId });
   const standings = useQuery(api.standings.byChampionship, { championshipId });
+  // Exempts d'un tableau (la coupe), affichés sous leur tour.
+  const byes = useQuery(api.bracket.byesByChampionship, { championshipId });
 
   if (championship === undefined || matches === undefined || matchdays === undefined) {
     return <main className="mx-auto max-w-4xl px-6 py-10 text-sm">Chargement…</main>;
@@ -29,6 +33,7 @@ export default function ChampionshipPage() {
       <p className="text-muted-foreground text-sm">
         Saison {championship.seasonLabel} · {championship.circuitName}
         {championship.format === "plateau" ? " · plateaux en 2 sets secs" : ""}
+        {championship.format === "tableau" ? " · tableau de classement, 3 sets gagnants" : ""}
       </p>
       <h1 className="text-2xl font-semibold tracking-tight">{championship.name}</h1>
 
@@ -37,7 +42,9 @@ export default function ChampionshipPage() {
           <CardTitle>Classement</CardTitle>
         </CardHeader>
         <CardContent>
-          {standings === undefined ? (
+          {championship.format === "tableau" ? (
+            <BracketStandings championshipId={championshipId} />
+          ) : standings === undefined ? (
             <p className="text-muted-foreground text-sm">Chargement…</p>
           ) : (
             <StandingsTable rows={standings} format={championship.format} />
@@ -49,11 +56,12 @@ export default function ChampionshipPage() {
       <div className="mt-3 flex flex-col gap-4">
         {matchdays.map((matchday) => {
           const dayMatches = matches.filter((match) => match.matchdayId === matchday._id);
+          const dayByes = (byes ?? []).filter((bye) => bye.matchdayId === matchday._id);
           return (
             <Card key={matchday._id}>
               <CardHeader>
                 <CardTitle className="text-base">
-                  {matchday.plateau === undefined ? "Journée" : "Plateau"} {matchday.number}
+                  {matchdayNoun(championship.format)} {matchday.number}
                   <span className="text-muted-foreground ml-2 text-sm font-normal">
                     {matchday.plateau === undefined
                       ? formatWindow(matchday.windowStart, matchday.windowEnd)
@@ -62,10 +70,16 @@ export default function ChampionshipPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="flex flex-col gap-2">
-                {dayMatches.length === 0 ? (
+                {dayMatches.length === 0 && dayByes.length === 0 ? (
                   <p className="text-muted-foreground text-sm">Aucun match programmé.</p>
                 ) : (
                   dayMatches.map((match) => <MatchRow key={match._id} match={match} />)
+                )}
+                {dayByes.length === 0 ? null : (
+                  <p className="text-muted-foreground text-sm">
+                    Exempt{dayByes.length > 1 ? "s" : ""} :{" "}
+                    {dayByes.map((bye) => bye.team.name).join(", ")}
+                  </p>
                 )}
               </CardContent>
             </Card>

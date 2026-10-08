@@ -18,6 +18,17 @@ export type SetScore = { home: number; away: number };
 
 export type MatchFormat = "standard" | "plateau";
 
+/**
+ * Format d'un championnat : il porte les règles de score **et** de classement. Le tableau
+ * (la coupe, ADR-0007) se joue au score du standard et ne se distingue qu'au classement.
+ */
+export type ChampionshipFormat = MatchFormat | "tableau";
+
+/** Règles de score d'un championnat, selon son format. */
+export function scoreFormatOf(format: ChampionshipFormat): MatchFormat {
+  return format === "tableau" ? "standard" : format;
+}
+
 /** Issue d'un match : un vainqueur, ou un match nul (plateau seulement). */
 export type MatchWinner = "home" | "away" | "draw";
 

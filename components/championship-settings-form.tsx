@@ -9,13 +9,13 @@ import { Select } from "@/components/ui/select";
 import type { Id } from "@/convex/_generated/dataModel";
 import { formatLabels } from "@/lib/labels";
 import { DEFAULT_QUOTA, type ReinforcementQuota } from "@/lib/rules/reinforcement";
-import type { MatchFormat } from "@/lib/rules/score";
+import type { ChampionshipFormat } from "@/lib/rules/score";
 
 export type ChampionshipSettings = {
   name: string;
   circuitId: Id<"circuits">;
   level: number;
-  format: MatchFormat;
+  format: ChampionshipFormat;
   reinforcementQuota: ReinforcementQuota | null;
 };
 
@@ -67,7 +67,7 @@ export function ChampionshipSettingsForm({
             name: String(form.get("name")),
             circuitId: String(form.get("circuitId")) as Id<"circuits">,
             level: Number(form.get("level")),
-            format: String(form.get("format")) as MatchFormat,
+            format: String(form.get("format")) as ChampionshipFormat,
             reinforcementQuota: withQuota
               ? {
                   maxPlayers: Number(form.get("maxPlayers")),
@@ -129,7 +129,7 @@ export function ChampionshipSettingsForm({
             defaultValue={initial?.format ?? "standard"}
             disabled={formatLocked}
           >
-            {(Object.keys(formatLabels) as MatchFormat[]).map((format) => (
+            {(Object.keys(formatLabels) as ChampionshipFormat[]).map((format) => (
               <option key={format} value={format}>
                 {formatLabels[format]}
               </option>

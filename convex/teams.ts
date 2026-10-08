@@ -4,6 +4,7 @@ import type { Id } from "./_generated/dataModel";
 import { mutation, query, type QueryCtx } from "./_generated/server";
 import { matchSummary, newTeamCache, summarize } from "./matches";
 import { attachedTeamIds, managedTeamIds, requireAdmin, requireUser } from "./authz";
+import { isBracketFrozen } from "./bracket";
 
 const team = v.object({
   _id: v.id("teams"),
@@ -58,6 +59,11 @@ export const create = mutation({
     const championship = await ctx.db.get(args.championshipId);
     if (championship === null) {
       throw new ConvexError("Championnat inconnu.");
+    }
+    if (championship.format === "tableau" && (await isBracketFrozen(ctx, championship._id))) {
+      throw new ConvexError(
+        "Le tableau est figé depuis son premier tour : sa taille dépend du nombre d'équipes engagées.",
+      );
     }
     return await ctx.db.insert("teams", {
       clubId: args.clubId,
@@ -225,6 +231,13 @@ export const remove = mutation({
   handler: async (ctx, { teamId }) => {
     await requireAdmin(ctx);
     const { team, matches, roster, managers, blocking } = await removal(ctx, teamId);
+    const championship = await ctx.db.get(team.championshipId);
+    if (championship?.format === "tableau" && (await isBracketFrozen(ctx, championship._id))) {
+      throw new ConvexError(
+        `${team.name} ne peut plus être retirée : le tableau est figé depuis son premier tour. ` +
+          "Un abandon se traite par des forfaits.",
+      );
+    }
     if (blocking.length > 0) {
       throw new ConvexError(
         `${team.name} ne peut pas être supprimée : ces matchs ont déjà un créneau ou une ` +

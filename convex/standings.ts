@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 
+import { scoreFormatOf } from "../lib/rules/score";
 import { computeStandings, type MatchOutcome } from "../lib/rules/standings";
 import { query } from "./_generated/server";
 
@@ -63,7 +64,7 @@ export const byChampionship = query({
     const rows = computeStandings(
       teams.map((team) => team._id),
       outcomes,
-      championship?.format ?? "standard",
+      scoreFormatOf(championship?.format ?? "standard"),
     );
     // Un club engage parfois plusieurs équipes : on ne le relit qu'une fois.
     const clubs = new Map<string, { name: string; logoUrl: string | null }>();

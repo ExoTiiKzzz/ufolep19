@@ -28,7 +28,13 @@ export const slot = v.object({
  * Format d'un championnat : règles de score et de classement. Indépendant du circuit.
  * `standard` : meilleur des 5 sets. `plateau` : 2 sets secs, match nul possible.
  */
-export const matchFormat = v.union(v.literal("standard"), v.literal("plateau"));
+export const matchFormat = v.union(
+  v.literal("standard"),
+  v.literal("plateau"),
+  // Tableau de classement intégral, la coupe (ADR-0007) : score du standard, classement à
+  // la place obtenue.
+  v.literal("tableau"),
+);
 
 /**
  * Quota d'un championnat qui admet des renforts venus de niveaux plus forts (le mixte) :
@@ -263,6 +269,17 @@ export default defineSchema({
     // Renseigné quand un administrateur arbitre ou corrige la feuille.
     settledBy: v.optional(v.id("users")),
   }).index("by_match", ["matchId"]),
+
+  // Exempt : dans un tableau, une équipe opposée à une place vide pour un tour. Elle gagne
+  // par forfait de l'absent ; ce n'est pas un match — ni créneau, ni feuille (ADR-0007).
+  byes: defineTable({
+    championshipId: v.id("championships"),
+    matchdayId: v.id("matchdays"),
+    teamId: v.id("teams"),
+  })
+    .index("by_championship", ["championshipId"])
+    .index("by_matchday", ["matchdayId"])
+    .index("by_team", ["teamId"]),
 
   // Composition : un joueur aligné pour une équipe sur un match. `matchdayId` est
   // dénormalisé pour rendre indexable la détection des cumuls sur une même journée.

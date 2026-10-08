@@ -3,6 +3,7 @@ import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { attachedTeamIds, managedTeamIds, requireAdmin, requireUser } from "./authz";
+import { assertBracketMatch } from "./bracket";
 import { matchResult, matchState, slot } from "./schema";
 
 export const matchSummary = v.object({
@@ -144,6 +145,10 @@ async function insertMatch(
       throw new ConvexError(`L'équipe ${team.name} n'est pas engagée dans ce championnat.`);
     }
   }
+  const championship = await ctx.db.get(matchday.championshipId);
+  if (championship?.format === "tableau") {
+    await assertBracketMatch(ctx, matchday, homeTeamId, awayTeamId);
+  }
 
   const sameChampionship = await ctx.db
     .query("matches")
@@ -229,6 +234,11 @@ export const mirrorMatchday = mutation({
     }
     if (source.championshipId !== target.championshipId) {
       throw new ConvexError("Les deux journées doivent appartenir au même championnat.");
+    }
+    if ((await ctx.db.get(target.championshipId))?.format === "tableau") {
+      throw new ConvexError(
+        "Un tableau n'a pas de matchs retour : les rencontres de chaque tour dépendent du précédent.",
+      );
     }
 
     const [outbound, existing] = await Promise.all(
@@ -323,6 +333,9 @@ export const updatePlanned = mutation({
       if (team === null || team.championshipId !== matchday.championshipId) {
         throw new ConvexError("Équipe inconnue ou non engagée dans ce championnat.");
       }
+    }
+    if ((await ctx.db.get(matchday.championshipId))?.format === "tableau") {
+      await assertBracketMatch(ctx, matchday, homeTeamId, awayTeamId, args.matchId);
     }
     await ctx.db.patch(args.matchId, {
       matchdayId,

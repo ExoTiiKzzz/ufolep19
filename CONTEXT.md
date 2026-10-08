@@ -67,7 +67,8 @@ _Avoid_: dérogation, joker, exception
 
 **Format** (`format`):
 Ensemble des règles de score et de classement d'un championnat, indépendant de son circuit :
-*standard* (meilleur des 5 sets) ou *plateau* (2 sets secs).
+*standard* (meilleur des 5 sets, classement aux points), *plateau* (2 sets secs) ou *tableau*
+(meilleur des 5 sets, classement à la place obtenue dans le tableau — la Coupe de Corrèze).
 _Avoid_: type, règlement, mode
 
 **Match** (`match`):
@@ -102,6 +103,34 @@ salle fixées par l'administrateur, et y jouent autant de matchs que prévu. Pas
 créneau ni de validation du visiteur : l'administrateur saisit lui-même les matchs et leurs
 résultats.
 _Avoid_: tournoi, rassemblement, regroupement
+
+**Tour** (`round`):
+Journée d'un championnat au format tableau. Chaque tour coupe chaque groupe en deux : ses
+vainqueurs disputent la moitié haute de ses places, ses vaincus la moitié basse. Un tour garde
+la fenêtre et la négociation de créneau d'une journée ordinaire.
+_Avoid_: manche, phase, étape
+
+**Tableau** (`bracket`):
+Ensemble des places d'un championnat au format tableau : la puissance de 2 immédiatement
+supérieure ou égale au nombre d'équipes engagées, complétée par des places vides. Il se fige dès
+que le tour 1 commence. Chaque équipe y joue à chaque tour, jusqu'à obtenir une place définitive.
+_Avoid_: arbre, coupe (nom de la compétition), élimination
+
+**Groupe** (`bracketGroup`):
+Équipes d'un tableau qui disputent, à un tour donné, le même bloc de places (« places 17 à 24 »).
+Désigné par sa fourchette de places, jamais par un code.
+_Avoid_: poule, division, niveau
+
+**Place vide** (`emptySlot`):
+Place d'un tableau que ne tient aucune équipe engagée. Elle perd toujours, si bien que les places
+vides finissent en bas du tableau et que les équipes se classent de 1 au nombre d'engagés.
+_Avoid_: fantôme, équipe fictive
+
+**Exempt** (`bye`):
+Équipe opposée à une place vide pour un tour : elle gagne ce match par forfait de l'adversaire
+absent, 3-0 (25-0 par set). Le nombre d'exempts d'un groupe découle de ses places vides ; le
+choix des équipes exemptes revient à l'administrateur.
+_Avoid_: bye, qualifié d'office, repos
 
 **Fenêtre** (`window`):
 Intervalle de dates d'une journée, à l'intérieur duquel le créneau d'un match est attendu. Ce

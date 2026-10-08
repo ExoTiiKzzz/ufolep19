@@ -2,6 +2,7 @@ import { ConvexError, v } from "convex/values";
 
 import {
   forfeitScore,
+  scoreFormatOf,
   validateMatchScore,
   type MatchFormat,
   type SetScore,
@@ -18,6 +19,7 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 import { requireAdmin } from "./authz";
+import { assertBracketResultEditable } from "./bracket";
 import { licenseStatus, newLicenseCache, statusAt, type LicenseCache } from "./licenses";
 import { actorFor, sidesOf, transitionTo } from "./negotiation";
 import {
@@ -55,7 +57,7 @@ async function formatOf(ctx: Ctx, match: Doc<"matches">): Promise<MatchFormat> {
   if (championship === null) {
     throw new ConvexError("Championnat inconnu.");
   }
-  return championship.format;
+  return scoreFormatOf(championship.format);
 }
 
 /**
@@ -469,6 +471,7 @@ export const correct = mutation({
       throw new ConvexError("Ce match n'a pas de feuille.");
     }
     const result = resultFrom(match, sets, await formatOf(ctx, match));
+    await assertBracketResultEditable(ctx, match, result.winnerTeamId);
     await ctx.db.patch(sheet._id, { sets, settledBy: admin._id });
     await ctx.db.patch(matchId, { result, forfeitAgainst: undefined });
     return null;

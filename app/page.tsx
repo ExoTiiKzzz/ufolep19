@@ -4,6 +4,7 @@ import { useQuery } from "convex/react";
 import Link from "next/link";
 import { useState } from "react";
 
+import { BracketStandings } from "@/components/bracket-standings";
 import { MatchRow } from "@/components/match-row";
 import { StandingsTable } from "@/components/standings-table";
 import { Badge } from "@/components/ui/badge";
@@ -14,7 +15,7 @@ import { Select } from "@/components/ui/select";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { formatPlateau, formatWindow } from "@/lib/format";
-import { matchdayStatusLabels } from "@/lib/labels";
+import { matchdayNoun, matchdayStatusLabels } from "@/lib/labels";
 
 export default function Home() {
   const championships = useQuery(api.championships.listAll);
@@ -100,10 +101,15 @@ export default function Home() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {standings === undefined ? (
+              {championship?.format === "tableau" && championshipId !== null ? (
+                <BracketStandings championshipId={championshipId} />
+              ) : standings === undefined ? (
                 <p className="text-muted-foreground text-sm">Chargement…</p>
               ) : (
-                <StandingsTable rows={standings} format={championship?.format} />
+                <StandingsTable
+                  rows={standings}
+                  format={championship?.format === "plateau" ? "plateau" : "standard"}
+                />
               )}
             </CardContent>
           </Card>
@@ -113,7 +119,7 @@ export default function Home() {
               <CardTitle className="text-base">
                 {matchday === undefined || matchday === null
                   ? "Journée"
-                  : `${matchdayStatusLabels[matchday.status]} — journée ${matchday.number}`}
+                  : `${matchdayStatusLabels[matchday.status]} — ${matchdayNoun(championship?.format).toLowerCase()} ${matchday.number}`}
                 {matchday === undefined || matchday === null ? null : (
                   <span className="text-muted-foreground ml-2 text-sm font-normal">
                     {matchday.plateau === undefined

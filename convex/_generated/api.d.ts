@@ -12,6 +12,7 @@ import type * as admin from "../admin.js";
 import type * as adminViews from "../adminViews.js";
 import type * as auth from "../auth.js";
 import type * as authz from "../authz.js";
+import type * as bracket from "../bracket.js";
 import type * as championships from "../championships.js";
 import type * as circuits from "../circuits.js";
 import type * as clubs from "../clubs.js";
@@ -44,6 +45,7 @@ declare const fullApi: ApiFromModules<{
   adminViews: typeof adminViews;
   auth: typeof auth;
   authz: typeof authz;
+  bracket: typeof bracket;
   championships: typeof championships;
   circuits: typeof circuits;
   clubs: typeof clubs;

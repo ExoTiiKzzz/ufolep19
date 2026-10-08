@@ -84,7 +84,7 @@ export async function insertChampionship(
     name: string;
     circuitId?: Id<"circuits">;
     level?: number;
-    format?: "standard" | "plateau";
+    format?: "standard" | "plateau" | "tableau";
     reinforcementQuota?: { maxPlayers: number; completeTo: number };
   },
 ): Promise<Id<"championships">> {

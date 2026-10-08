@@ -58,7 +58,7 @@ Saison ──< Circuit ──< Championnat ──< Journée ──< Match >─�
 - **Championnat** — compétition d'une saison regroupant N équipes. Porte le calendrier et le
   classement, et trois réglages **indépendants** : son **circuit** (unicité de la feuille
   verte), son **niveau** (1 = le plus fort ; « D1, D2, D3 », le mixte est de niveau 3) et son
-  **format** (`standard` ou `plateau` : règles de score et de classement). Pas de case « coupe »
+  **format** (`standard`, `plateau` ou `tableau` : règles de score et de classement). Pas de case « coupe »
   ou « féminin » qui mêlerait ces axes. Un championnat peut porter un **quota de renforts**
   (le mixte, voir « Renforts »). Le format ne se change plus une fois des journées créées ; le
   circuit ne change que si l'unicité des feuilles vertes y survit.
@@ -376,8 +376,31 @@ Barème plateau — **provisoire**, en attente de confirmation par l'UFOLEP 19 :
 
 Le forfait y garde la même pénalité croissante qu'au format standard.
 
-La Coupe de Corrèze se joue pour l'instant comme un championnat standard, dans son propre
-circuit, avec le classement classique — en attente de son règlement.
+### Coupe : format tableau
+
+La Coupe de Corrèze se joue au format **tableau**, dans son propre circuit : score du standard
+(3 sets gagnants), mais classement à la **place obtenue dans le tableau**, pas aux points —
+[ADR-0007](./docs/adr/0007-coupe-en-tableau-a-places-vides.md).
+
+- Le tableau compte la puissance de 2 immédiatement supérieure ou égale au nombre d'équipes
+  engagées ; les places en trop sont des **places vides**, qui perdent toujours.
+- Chaque journée est un **tour**. Au tour *t*, chaque **groupe** — les équipes qui disputent le
+  même bloc de places — se coupe en deux : vainqueurs en haut, vaincus en bas. Un tour garde la
+  fenêtre et la négociation d'une journée ordinaire.
+- Une équipe opposée à une place vide est **exempte** : victoire 3-0 par forfait de l'absent, sans
+  créneau ni feuille, et sans pénalité pour personne. Dans un groupe de *S* places et *r* équipes,
+  il faut exactement *e* = min(*S* − *r*, *r*) exempts et (*r* − *e*) / 2 matchs : l'application
+  impose ces nombres, l'administrateur choisit librement les équipes.
+- L'administrateur forme les rencontres. Sont refusés : deux équipes de groupes différents, une
+  équipe deux fois dans le même tour, une équipe dont le match du tour précédent n'est pas
+  terminé.
+- Le tableau **se fige** au premier match ou exempt du tour 1 : engager ou supprimer une équipe de
+  la coupe est ensuite refusé. Un abandon se traite par des forfaits successifs.
+- Le classement montre, pour chaque équipe, la fourchette de places qu'elle dispute encore
+  (« places 17 à 24 ») puis sa place définitive, et son parcours V / D / E. Une équipe avance dès
+  que **son** match est terminé ; un litige ne fait avancer personne. Les codes de groupe du
+  règlement (11, 112…) ne sont pas affichés.
+- La règle vit dans un module pur, `lib/rules/bracket.ts`.
 
 Départage, dans cet ordre :
 

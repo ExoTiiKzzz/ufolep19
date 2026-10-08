@@ -24,7 +24,14 @@ import {
   parisDayOf,
   parisTimestampFromInput,
 } from "@/lib/format";
-import { formatLabels, levelLabel, matchStateLabels, matchStateVariant } from "@/lib/labels";
+import {
+  formatLabels,
+  levelLabel,
+  matchdayNoun,
+  matchStateLabels,
+  matchStateVariant,
+} from "@/lib/labels";
+import { roundCount } from "@/lib/rules/bracket";
 import { errorMessage } from "@/lib/errors";
 
 export default function AdminChampionshipPage() {
@@ -52,6 +59,10 @@ export default function AdminChampionshipPage() {
   const updateChampionship = useMutation(api.championships.update);
 
   const isPlateau = championship?.format === "plateau";
+  // La coupe (ADR-0007) : ses journées sont des tours, formés groupe par groupe.
+  const isBracket = championship?.format === "tableau";
+  const noun = matchdayNoun(championship?.format);
+  const rounds = roundCount((teams ?? []).length);
 
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -191,9 +202,13 @@ export default function AdminChampionshipPage() {
 
       <Card className="mt-6">
         <CardHeader>
-          <CardTitle className="text-base">{isPlateau ? "Plateaux" : "Journées"}</CardTitle>
+          <CardTitle className="text-base">
+            {isPlateau ? "Plateaux" : isBracket ? "Tours" : "Journées"}
+          </CardTitle>
           <CardDescription>
-            {isPlateau
+            {isBracket
+              ? `Chaque journée est un tour du tableau : ${rounds} tour${rounds > 1 ? "s" : ""} pour ${(teams ?? []).length} équipes. Un tour garde sa fenêtre et la négociation de créneau habituelle.`
+              : isPlateau
               ? "Chaque journée est un plateau : une date, une heure et une salle communes à ses matchs. Pas de négociation de créneau."
               : "Le créneau des matchs est attendu dans la fenêtre de la journée. Un match avancé ou retardé par arrangement entre les équipes peut se jouer en dehors : il est alors signalé, et le visiteur doit valider explicitement."}
           </CardDescription>
@@ -204,7 +219,9 @@ export default function AdminChampionshipPage() {
               matchday.plateau === undefined ? (
                 <details key={matchday._id}>
                   <summary className="cursor-pointer">
-                    <span className="font-medium">Journée {matchday.number}</span>{" "}
+                    <span className="font-medium">
+                      {noun} {matchday.number}
+                    </span>{" "}
                     <span className="text-muted-foreground">
                       {formatWindow(matchday.windowStart, matchday.windowEnd)}
                     </span>
@@ -220,6 +237,7 @@ export default function AdminChampionshipPage() {
                     }
                     onInvalid={() => setError("Dates de fenêtre invalides.")}
                   />
+                  {isBracket ? null : (
                   <MirrorForm
                     idPrefix={`mirror-${matchday._id}-`}
                     target={matchday}
@@ -240,6 +258,7 @@ export default function AdminChampionshipPage() {
                       })
                     }
                   />
+                  )}
                 </details>
               ) : (
                 <details key={matchday._id}>
@@ -378,7 +397,9 @@ export default function AdminChampionshipPage() {
         <CardHeader>
           <CardTitle className="text-base">Matchs</CardTitle>
           <CardDescription>
-            {isPlateau
+            {isBracket
+              ? "Dans un tableau, formez les rencontres depuis la carte « Tableau » : l'application y vérifie les groupes, les exempts et le tour précédent."
+              : isPlateau
               ? "Saisie manuelle : programmez autant de matchs par équipe que le plateau en compte. Ils naissent confirmés, à la date et dans la salle du plateau ; les résultats se saisissent depuis chaque match."
               : "Saisie manuelle : désignez qui reçoit. Un doublon d'affiche est signalé sans être bloqué."}
           </CardDescription>
@@ -428,7 +449,7 @@ export default function AdminChampionshipPage() {
               <Select id="matchdayId" name="matchdayId" className="mt-2" required>
                 {(matchdays ?? []).map((matchday) => (
                   <option key={matchday._id} value={matchday._id}>
-                    {isPlateau ? "Plateau" : "Journée"} {matchday.number}
+                    {noun} {matchday.number}
                   </option>
                 ))}
               </Select>
@@ -459,6 +480,39 @@ export default function AdminChampionshipPage() {
           </form>
         </CardContent>
       </Card>
+
+      {isBracket ? (
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle className="text-base">Tableau</CardTitle>
+            <CardDescription>
+              Tableau de {2 ** rounds} places pour {(teams ?? []).length} équipes : les places en
+              trop sont vides et perdent toujours. Dans chaque groupe, le nombre d&apos;exempts et
+              de matchs est imposé ; le choix des équipes vous revient.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            {(matchdays ?? []).filter((matchday) => matchday.number <= rounds).length === 0 ? (
+              <p className="text-muted-foreground text-sm">
+                Créez d&apos;abord les tours, numérotés de 1 à {rounds}.
+              </p>
+            ) : null}
+            {(matchdays ?? [])
+              .filter((matchday) => matchday.number <= rounds)
+              .map((matchday) => (
+                <details key={matchday._id} className="rounded-md border px-3 py-2">
+                  <summary className="cursor-pointer text-sm font-medium">
+                    Tour {matchday.number}{" "}
+                    <span className="text-muted-foreground font-normal">
+                      {formatWindow(matchday.windowStart, matchday.windowEnd)}
+                    </span>
+                  </summary>
+                  <TourPlan matchdayId={matchday._id} guard={guard} />
+                </details>
+              ))}
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card className="mt-6">
         <CardHeader>
@@ -520,6 +574,159 @@ export default function AdminChampionshipPage() {
         </CardContent>
       </Card>
     </main>
+  );
+}
+
+/**
+ * Plan d'un tour de tableau : groupe par groupe, les exempts et matchs exigés, ce qui est déjà
+ * fait, et les équipes qui restent à apparier. L'administrateur choisit librement ; Convex
+ * refuse ce qui casserait le tableau.
+ */
+function TourPlan({
+  matchdayId,
+  guard,
+}: {
+  matchdayId: Id<"matchdays">;
+  guard: (action: () => Promise<unknown>, success?: string) => Promise<void>;
+}) {
+  const plan = useQuery(api.bracket.tourPlan, { matchdayId });
+  const createMatch = useMutation(api.matches.create);
+  const declareBye = useMutation(api.bracket.declareBye);
+  const cancelBye = useMutation(api.bracket.cancelBye);
+
+  if (plan === undefined) {
+    return <p className="text-muted-foreground mt-2 text-sm">Chargement…</p>;
+  }
+  return (
+    <div className="mt-3 flex flex-col gap-3 text-sm">
+      {plan.groups.length === 0 ? (
+        <p className="text-muted-foreground">
+          Aucun groupe connu : le tour précédent n&apos;est pas encore terminé.
+        </p>
+      ) : null}
+      {plan.groups.map((group) => {
+        const byesLeft = group.byesRequired - group.byes.length;
+        const matchesLeft = group.matchesRequired - group.matches.length;
+        return (
+          <div key={group.from} className="flex flex-col gap-2 rounded-md border p-3">
+            <p className="flex flex-wrap items-center gap-2">
+              <span className="font-medium first-letter:uppercase">{group.label}</span>
+              <span className="text-muted-foreground">
+                {group.real} équipe{group.real > 1 ? "s" : ""}
+              </span>
+              <Badge variant={byesLeft > 0 ? "secondary" : "muted"}>
+                Exempts {group.byes.length} / {group.byesRequired}
+              </Badge>
+              <Badge variant={matchesLeft > 0 ? "secondary" : "muted"}>
+                Matchs {group.matches.length} / {group.matchesRequired}
+              </Badge>
+            </p>
+            {group.matches.map((match) => (
+              <Link
+                key={match._id}
+                href={`/matchs/${match._id}`}
+                className="hover:bg-muted/50 rounded-md px-2 py-1"
+              >
+                {match.home.name} — {match.away.name}
+              </Link>
+            ))}
+            {group.byes.map((bye) => (
+              <p key={bye._id} className="flex items-center gap-2 px-2">
+                {bye.team.name} <Badge variant="muted">exempte</Badge>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="ml-auto"
+                  onClick={() =>
+                    guard(() => cancelBye({ byeId: bye._id }), "Exemption annulée.")
+                  }
+                >
+                  Annuler
+                </Button>
+              </p>
+            ))}
+            {group.available.length === 0 ? null : (
+              <div className="flex flex-col gap-1 border-t pt-2">
+                <p className="text-muted-foreground text-xs">À apparier</p>
+                {group.available.map((team) => (
+                  <p key={team._id} className="flex items-center gap-2 px-2">
+                    {team.name}
+                    <span className="text-muted-foreground">· {team.clubName}</span>
+                    {byesLeft > 0 ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="ml-auto"
+                        onClick={() =>
+                          guard(
+                            () => declareBye({ matchdayId, teamId: team._id }),
+                            `${team.name} exempte au tour ${plan.round}.`,
+                          )
+                        }
+                      >
+                        Exempter
+                      </Button>
+                    ) : null}
+                  </p>
+                ))}
+              </div>
+            )}
+            {matchesLeft > 0 && group.available.length >= 2 ? (
+              <form
+                className="flex flex-wrap items-end gap-2"
+                onSubmit={async (event) => {
+                  event.preventDefault();
+                  const form = new FormData(event.currentTarget);
+                  await guard(async () => {
+                    await createMatch({
+                      matchdayId,
+                      homeTeamId: String(form.get("home")) as Id<"teams">,
+                      awayTeamId: String(form.get("away")) as Id<"teams">,
+                    });
+                  }, "Rencontre créée.");
+                }}
+              >
+                {(["home", "away"] as const).map((side) => (
+                  <div key={side} className="min-w-40 flex-1">
+                    <Label htmlFor={`${matchdayId}-${group.from}-${side}`}>
+                      {side === "home" ? "Reçoit" : "Se déplace"}
+                    </Label>
+                    <Select
+                      id={`${matchdayId}-${group.from}-${side}`}
+                      name={side}
+                      className="mt-1"
+                      required
+                    >
+                      <option value="">Choisir…</option>
+                      {group.available.map((team) => (
+                        <option key={team._id} value={team._id}>
+                          {team.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                ))}
+                <Button type="submit" variant="outline">
+                  Apparier
+                </Button>
+              </form>
+            ) : null}
+            {group.waiting > 0 ? (
+              <p className="text-muted-foreground text-xs">
+                {group.waiting > 1
+                  ? `${group.waiting} équipes de ce groupe attendent encore la fin du tour précédent.`
+                  : "1 équipe de ce groupe attend encore la fin du tour précédent."}
+              </p>
+            ) : null}
+          </div>
+        );
+      })}
+      {plan.waiting.length === 0 ? null : (
+        <p className="text-muted-foreground">
+          Tour précédent en cours pour : {plan.waiting.map((team) => team.name).join(", ")}.
+        </p>
+      )}
+    </div>
   );
 }
 

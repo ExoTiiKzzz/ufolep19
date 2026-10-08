@@ -35,13 +35,14 @@ import {
   parisTimestampFromInput,
 } from "@/lib/format";
 import {
+  matchdayNoun,
   matchStateLabels,
   matchStateVariant,
   postponementStatusLabels,
   proposalStatusLabels,
 } from "@/lib/labels";
 import { flagMessage, kindLabel, UPPER_LEVEL_MATCH_LIMIT } from "@/lib/rules/reinforcement";
-import { forfeitScore, type MatchFormat } from "@/lib/rules/score";
+import { forfeitScore, scoreFormatOf, type MatchFormat } from "@/lib/rules/score";
 import { isOutsideWindow, outsideWindowMessage } from "@/lib/rules/window";
 
 export default function MatchPage() {
@@ -57,7 +58,7 @@ export default function MatchPage() {
     api.championships.get,
     match ? { championshipId: match.championshipId } : "skip",
   );
-  const format: MatchFormat = championship?.format ?? "standard";
+  const format: MatchFormat = scoreFormatOf(championship?.format ?? "standard");
   const isPlateau = format === "plateau";
   // Les licenciés alignables ne sont lus qu'au moment de transcrire la feuille, et par qui
   // en a la main : tout le club, licences jugées à la date du match.
@@ -178,7 +179,7 @@ export default function MatchPage() {
   return (
     <main className="mx-auto max-w-3xl px-6 py-10">
       <p className="text-muted-foreground text-sm">
-        {isPlateau ? "Plateau" : "Journée"} {match.matchdayNumber}
+        {matchdayNoun(championship?.format)} {match.matchdayNumber}
         {isPlateau && match.slot !== undefined
           ? ` · ${formatPlateau(match.slot)}`
           : ` · ${formatWindow(match.windowStart, match.windowEnd)}`}

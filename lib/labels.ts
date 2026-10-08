@@ -67,7 +67,16 @@ export const matchdayStatusLabels = {
 export const formatLabels = {
   standard: "Standard — 3 sets gagnants",
   plateau: "Plateau — 2 sets secs",
+  tableau: "Tableau — classement à la place, 3 sets gagnants",
 } as const;
+
+/**
+ * Nom d'une journée selon le format : un plateau, un tour de tableau (la coupe), ou une
+ * journée ordinaire.
+ */
+export function matchdayNoun(format: keyof typeof formatLabels | undefined): string {
+  return format === "plateau" ? "Plateau" : format === "tableau" ? "Tour" : "Journée";
+}
 
 /** « D1 », « D2 » : le niveau tel que les clubs le disent. */
 export function levelLabel(level: number): string {
