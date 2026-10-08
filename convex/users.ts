@@ -1,6 +1,7 @@
 import { ConvexError, v } from "convex/values";
 
-import { internalQuery, mutation, query } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
+import { internalQuery, mutation, query, type QueryCtx } from "./_generated/server";
 import { getCurrentUser, managedTeamIds, requireAdmin } from "./authz";
 import { role } from "./schema";
 
@@ -14,6 +15,21 @@ const account = v.object({
   // « aucune fiche joueur rattachée ».
   playerId: v.union(v.id("players"), v.null()),
 });
+
+/**
+ * Nom d'un compte tel que l'historique d'un match l'affiche.
+ *
+ * Un compte supprimé garde son nom, suivi de la mention : l'historique ne perd pas son sens
+ * — on sait toujours qui a saisi la feuille contestée.
+ */
+export async function accountName(ctx: QueryCtx, userId: Id<"users">): Promise<string> {
+  const user = await ctx.db.get(userId);
+  if (user === null) {
+    return "Compte supprimé";
+  }
+  const name = user.name ?? user.email ?? "Compte sans nom";
+  return user.deletedAt === undefined ? name : `${name} (compte supprimé)`;
+}
 
 /**
  * Le compte connecté, ou `null`. Sert à l'affichage de l'identité courante ;
@@ -38,7 +54,11 @@ export const me = query({
   },
 });
 
-/** Tous les comptes, avec les équipes qu'ils gèrent. Réservé aux administrateurs. */
+/**
+ * Tous les comptes, avec les équipes qu'ils gèrent. Réservé aux administrateurs.
+ *
+ * Les comptes supprimés n'y figurent pas : ils ne survivent que dans l'historique des matchs.
+ */
 export const list = query({
   args: {},
   returns: v.array(
@@ -53,7 +73,9 @@ export const list = query({
   ),
   handler: async (ctx) => {
     await requireAdmin(ctx);
-    const users = await ctx.db.query("users").collect();
+    const users = (await ctx.db.query("users").collect()).filter(
+      (user) => user.deletedAt === undefined,
+    );
     return await Promise.all(
       users.map(async (user) => {
         const teamIds = await managedTeamIds(ctx, user._id);
@@ -104,6 +126,89 @@ export const setRole = mutation({
   },
 });
 
+/**
+ * Supprime un compte.
+ *
+ * Identifiants, sessions, adresse e-mail, rattachements d'équipe et lien vers la fiche
+ * Joueur disparaissent : la personne ne peut plus se connecter, et l'adresse est libérée
+ * pour un nouveau compte. La ligne reste, réduite à son nom, parce que l'historique des
+ * matchs y renvoie — il affiche « Nom (compte supprimé) ». La fiche Joueur, donnée
+ * d'effectif, n'est pas touchée.
+ *
+ * Garde-fous : ni son propre compte — un clic malheureux ne doit pas déconnecter
+ * l'administrateur qui opère —, ni le dernier administrateur.
+ */
+export const remove = mutation({
+  args: { userId: v.id("users") },
+  returns: v.null(),
+  handler: async (ctx, { userId }) => {
+    const admin = await requireAdmin(ctx);
+    const target = await ctx.db.get(userId);
+    if (target === null || target.deletedAt !== undefined) {
+      throw new ConvexError("Compte inconnu.");
+    }
+    if (target._id === admin._id) {
+      throw new ConvexError("Vous ne pouvez pas supprimer votre propre compte.");
+    }
+    if (target.role === "admin") {
+      const admins = await ctx.db
+        .query("users")
+        .withIndex("by_role", (q) => q.eq("role", "admin"))
+        .collect();
+      if (admins.length <= 1) {
+        throw new ConvexError(
+          "Impossible de supprimer le dernier administrateur : la plateforme deviendrait ingérable.",
+        );
+      }
+    }
+
+    const accounts = await ctx.db
+      .query("authAccounts")
+      .withIndex("userIdAndProvider", (q) => q.eq("userId", userId))
+      .collect();
+    for (const account of accounts) {
+      const codes = await ctx.db
+        .query("authVerificationCodes")
+        .withIndex("accountId", (q) => q.eq("accountId", account._id))
+        .collect();
+      for (const code of codes) {
+        await ctx.db.delete(code._id);
+      }
+      await ctx.db.delete(account._id);
+    }
+    const sessions = await ctx.db
+      .query("authSessions")
+      .withIndex("userId", (q) => q.eq("userId", userId))
+      .collect();
+    for (const session of sessions) {
+      const tokens = await ctx.db
+        .query("authRefreshTokens")
+        .withIndex("sessionId", (q) => q.eq("sessionId", session._id))
+        .collect();
+      for (const token of tokens) {
+        await ctx.db.delete(token._id);
+      }
+      await ctx.db.delete(session._id);
+    }
+    const managed = await ctx.db
+      .query("teamManagers")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect();
+    for (const row of managed) {
+      await ctx.db.delete(row._id);
+    }
+
+    // Le rôle retombe à `player` : une ligne supprimée ne doit pas compter parmi les
+    // administrateurs du garde-fou.
+    await ctx.db.replace(userId, {
+      name: target.name ?? target.email ?? "Compte sans nom",
+      role: "player",
+      deletedAt: Date.now(),
+    });
+    return null;
+  },
+});
+
 /** Rattache un compte à une fiche joueur, ou le détache. Facultatif. */
 export const linkPlayer = mutation({
   args: { userId: v.id("users"), playerId: v.union(v.id("players"), v.null()) },
@@ -134,6 +239,19 @@ export const assertAdmin = internalQuery({
       throw new ConvexError("Action réservée aux administrateurs.");
     }
     return null;
+  },
+});
+
+/** Adresse et nom d'un compte actif, pour les actions qui touchent à ses identifiants. */
+export const credentialsOf = internalQuery({
+  args: { userId: v.id("users") },
+  returns: v.union(v.object({ email: v.string(), name: v.string() }), v.null()),
+  handler: async (ctx, { userId }) => {
+    const user = await ctx.db.get(userId);
+    if (user === null || user.deletedAt !== undefined || user.email === undefined) {
+      return null;
+    }
+    return { email: user.email, name: user.name ?? "" };
   },
 });
 

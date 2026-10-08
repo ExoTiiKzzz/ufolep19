@@ -22,6 +22,7 @@ import type * as mail from "../mail.js";
 import type * as matchdays from "../matchdays.js";
 import type * as matches from "../matches.js";
 import type * as negotiation from "../negotiation.js";
+import type * as password from "../password.js";
 import type * as players from "../players.js";
 import type * as reinforcements from "../reinforcements.js";
 import type * as roster from "../roster.js";
@@ -53,6 +54,7 @@ declare const fullApi: ApiFromModules<{
   matchdays: typeof matchdays;
   matches: typeof matches;
   negotiation: typeof negotiation;
+  password: typeof password;
   players: typeof players;
   reinforcements: typeof reinforcements;
   roster: typeof roster;

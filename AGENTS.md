@@ -91,8 +91,17 @@ La mutation de création de match rejette ou signale :
 - une paire d'équipes déjà programmée avec le même receveur (signalement, pas rejet — un
   championnat peut légitimement en compter deux).
 
-Le créneau proposé pour un match doit tomber **dans la fenêtre de dates de sa journée**. La fenêtre
-fait office de date butoir de négociation.
+Le créneau d'un match est attendu **dans la fenêtre de dates de sa journée**, mais la fenêtre est
+une **borne souple** : un match avancé ou retardé par arrangement entre les deux équipes se joue
+hors fenêtre. Un tel créneau est **signalé** aux responsables et à l'administrateur, jamais refusé,
+et sa proposition n'a **pas de validation tacite** — le visiteur doit consentir explicitement.
+Déplacer la fenêtre d'une journée (`matchdays.updateWindow`) ne touche donc aucun match :
+[ADR-0006](./docs/adr/0006-fenetre-de-journee-borne-souple.md).
+
+Une journée peut **reprendre en retour** une autre journée du même championnat
+(`matches.mirrorMatchday`) : ses matchs y sont recréés, receveur et visiteur inversés, par les
+mêmes garde-fous qu'une création à la main. Ce n'est pas une génération : voir l'addendum de
+l'ADR-0001.
 
 ### Plateau
 
@@ -126,8 +135,8 @@ Forfait (admin) ─────────────────────�
 ```
 
 1. **Planifié** — le match existe (receveur, visiteur, journée), sans créneau.
-2. **En attente** — le receveur a proposé un créneau (date, heure, lieu) dans la fenêtre de la
-   journée.
+2. **En attente** — le receveur a proposé un créneau (date, heure, lieu), en principe dans la
+   fenêtre de la journée.
 3. **Confirmé** — le visiteur a validé, ou la validation tacite s'est appliquée. Le créneau est
    ferme.
    - Un **refus** ramène le match à l'étape 1. La proposition refusée reste dans l'historique.
@@ -149,7 +158,8 @@ Une proposition ou une feuille de match restée sans réponse est acceptée auto
 
 Si ce calcul laisse **moins de 24 h** pour réagir, aucune échéance n'est programmée et la validation
 explicite du visiteur devient obligatoire. Une proposition faite la veille au soir laisserait sinon
-une heure pour refuser, ce qui revient à imposer la date.
+une heure pour refuser, ce qui revient à imposer la date. Même règle pour un créneau proposé **hors
+de la fenêtre** de sa journée : un silence ne vaut pas accord pour un arrangement inhabituel.
 
 L'échéance est programmée par `scheduler.runAfter` au moment de la soumission, pas par un cron qui
 balaierait la base.
@@ -435,7 +445,13 @@ Auth assurée par **Convex Auth** (`@convex-dev/auth`), avec un provider mot de 
   Elle refuse d'écraser : si un compte existe déjà pour cet e-mail, elle échoue avec un message
   explicite et ne modifie rien. Elle refuse aussi un mot de passe de moins de 8 caractères.
 - **Création de comptes** : un administrateur crée un compte (e-mail, nom, rôle initial,
-  rattachement club / équipe le cas échéant) depuis l'interface d'administration.
+  rattachement club / équipe le cas échéant) depuis l'interface d'administration. Le mot de passe
+  est **généré** par la plateforme, jamais choisi par l'administrateur (voir plus bas).
+- **Suppression de comptes** : un administrateur supprime un compte (`users.remove`). Identifiants,
+  sessions, adresse e-mail, rattachements d'équipe et lien vers la fiche Joueur disparaissent ;
+  l'adresse est libérée. La ligne du compte reste, réduite à son nom, parce que l'historique des
+  matchs y renvoie (qui a proposé, saisi, tranché) : il affiche « Nom (compte supprimé) ». La
+  mutation refuse le dernier administrateur et le compte de l'appelant lui-même.
 - **Modification des rôles** : un administrateur peut faire passer un compte de `player` à
   `manager` ou `admin`, et inversement. Garde-fou : la mutation refuse de supprimer le dernier
   compte `admin` (protection contre le verrouillage total).
@@ -455,9 +471,15 @@ Le compte reçoit un **mot de passe provisoire**, envoyé par e-mail à la perso
 « Envoi d'e-mails ») **et** affiché une seule fois à l'écran. Si l'envoi échoue, l'écran le dit et
 donne le mot de passe à transmettre autrement.
 
-Ce mot de passe n'est jamais réaffiché, et il n'existe **aucun parcours de réinitialisation** : un
-compte dont le mot de passe est perdu se règle en recréant le compte. C'est la contrepartie du choix
-d'envoyer le mot de passe plutôt qu'un lien de définition.
+Ce mot de passe n'est jamais réaffiché. Tous les comptes créés depuis l'interface suivent ce
+régime, licenciés ou non : seule la commande d'amorçage prend un mot de passe en argument.
+
+- **Changer son mot de passe** : tout compte connecté remplace le sien en donnant l'actuel. C'est
+  ce qui rend le mot de passe « provisoire » : l'administrateur n'a rien à retenir.
+- **Mot de passe perdu** : l'administrateur en **réinitialise** un (`admin.resetPassword`) — un
+  nouveau mot de passe provisoire, envoyé et affiché une fois, et les sessions ouvertes fermées. Il
+  n'y a pas de réinitialisation en libre-service : c'est la contrepartie du choix d'envoyer le mot de
+  passe plutôt qu'un lien de définition, et elle dépendrait entièrement de l'envoi d'e-mails.
 
 ## Envoi d'e-mails
 

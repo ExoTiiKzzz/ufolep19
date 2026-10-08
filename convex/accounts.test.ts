@@ -19,7 +19,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-test("l'administrateur crée un compte, qui peut ensuite se connecter", async () => {
+test("l'administrateur crée un compte, dont le mot de passe est généré", async () => {
   const t = convexTest(schema, modules);
   const admin = await seedAccount(t, {
     email: "comite@ufolep19.fr",
@@ -27,18 +27,18 @@ test("l'administrateur crée un compte, qui peut ensuite se connecter", async ()
     role: "admin",
   });
 
-  const { userId, mail } = await t
+  const { userId, account } = await t
     .withIdentity({ subject: admin })
     .action(api.admin.createUserAccount, {
       email: "Responsable@Club-A.fr",
-      password: "motdepasse-solide",
       name: "Responsable Club A",
       role: "manager",
     });
 
   // Aucun fournisseur d'envoi n'est configuré en test : la création réussit et le dit.
-  expect(mail).toMatchObject({ sent: false });
-  expect(mail.error).toMatch(/Envoi impossible : BREVO_API_KEY, MAIL_SENDER_EMAIL/);
+  expect(account.mail).toMatchObject({ sent: false });
+  expect(account.mail?.error).toMatch(/Envoi impossible : BREVO_API_KEY, MAIL_SENDER_EMAIL/);
+  expect(account.temporaryPassword).toMatch(/^\w{4}-\w{4}-\w{4}-\w{4}$/);
 
   expect(await t.withIdentity({ subject: userId }).query(api.users.me, {})).toMatchObject({
     email: "responsable@club-a.fr",
@@ -49,7 +49,7 @@ test("l'administrateur crée un compte, qui peut ensuite se connecter", async ()
       provider: "password",
       params: {
         email: "responsable@club-a.fr",
-        password: "motdepasse-solide",
+        password: account.temporaryPassword!,
         flow: "signIn",
       },
     }),
@@ -67,7 +67,6 @@ test("un responsable ne peut pas créer de compte", async () => {
   await expect(
     t.withIdentity({ subject: manager }).action(api.admin.createUserAccount, {
       email: "complice@club-a.fr",
-      password: "motdepasse-solide",
       name: "Complice",
       role: "admin",
     }),

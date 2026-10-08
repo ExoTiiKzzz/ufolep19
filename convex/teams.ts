@@ -1,6 +1,7 @@
 import { ConvexError, v } from "convex/values";
 
-import { mutation, query } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
+import { mutation, query, type QueryCtx } from "./_generated/server";
 import { matchSummary, newTeamCache, summarize } from "./matches";
 import { attachedTeamIds, managedTeamIds, requireAdmin, requireUser } from "./authz";
 
@@ -64,6 +65,190 @@ export const create = mutation({
       championshipId: args.championshipId,
       name,
     });
+  },
+});
+
+/**
+ * Équipes d'une saison, groupées par championnat (nom du championnat, puis de l'équipe).
+ * Sert au rattachement d'un responsable, qui peut viser n'importe quelle équipe de la
+ * saison. Lecture publique : rien de nominatif.
+ */
+export const listBySeason = query({
+  args: { seasonId: v.id("seasons") },
+  returns: v.array(
+    v.object({
+      _id: v.id("teams"),
+      name: v.string(),
+      championshipId: v.id("championships"),
+      championshipName: v.string(),
+    }),
+  ),
+  handler: async (ctx, { seasonId }) => {
+    const [teams, championships] = await Promise.all([
+      ctx.db
+        .query("teams")
+        .withIndex("by_season", (q) => q.eq("seasonId", seasonId))
+        .collect(),
+      ctx.db
+        .query("championships")
+        .withIndex("by_season", (q) => q.eq("seasonId", seasonId))
+        .collect(),
+    ]);
+    const names = new Map(championships.map((c) => [c._id, c.name]));
+    return teams
+      .map((team) => ({
+        _id: team._id,
+        name: team.name,
+        championshipId: team.championshipId,
+        championshipName: names.get(team.championshipId) ?? "",
+      }))
+      .sort(
+        (a, b) =>
+          a.championshipName.localeCompare(b.championshipName, "fr") ||
+          a.name.localeCompare(b.name, "fr"),
+      );
+  },
+});
+
+/**
+ * Renomme une équipe. Le nom n'est recopié nulle part — matchs et feuilles pointent vers
+ * l'équipe —, si bien que le nouveau nom s'applique partout, matchs passés compris.
+ */
+export const rename = mutation({
+  args: { teamId: v.id("teams"), name: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+    const name = args.name.trim();
+    if (name === "") {
+      throw new ConvexError("Le nom de l'équipe est obligatoire.");
+    }
+    if ((await ctx.db.get(args.teamId)) === null) {
+      throw new ConvexError("Équipe inconnue.");
+    }
+    await ctx.db.patch(args.teamId, { name });
+    return null;
+  },
+});
+
+/** Matchs d'une équipe, qu'elle reçoive ou se déplace. */
+async function matchesOfTeam(ctx: QueryCtx, teamId: Id<"teams">) {
+  const [home, away] = await Promise.all([
+    ctx.db
+      .query("matches")
+      .withIndex("by_home_team", (q) => q.eq("homeTeamId", teamId))
+      .collect(),
+    ctx.db
+      .query("matches")
+      .withIndex("by_away_team", (q) => q.eq("awayTeamId", teamId))
+      .collect(),
+  ]);
+  return [...home, ...away];
+}
+
+/**
+ * Ce que la suppression d'une équipe emporterait, et ce qui l'empêche.
+ *
+ * Une équipe se supprime tant qu'aucun de ses matchs n'a dépassé Planifié : c'est le cas de
+ * l'équipe saisie en double ou dans le mauvais championnat. Dès qu'un créneau est proposé,
+ * un autre responsable attend ce match, et il ne doit pas disparaître de son tableau de bord.
+ * Le retrait d'une équipe en cours de saison relève du forfait, pas d'une suppression.
+ */
+async function removal(ctx: QueryCtx, teamId: Id<"teams">) {
+  const team = await ctx.db.get(teamId);
+  if (team === null) {
+    throw new ConvexError("Équipe inconnue.");
+  }
+  const [matches, roster, managers] = await Promise.all([
+    matchesOfTeam(ctx, teamId),
+    ctx.db
+      .query("rosterEntries")
+      .withIndex("by_team", (q) => q.eq("teamId", teamId))
+      .collect(),
+    ctx.db
+      .query("teamManagers")
+      .withIndex("by_team", (q) => q.eq("teamId", teamId))
+      .collect(),
+  ]);
+  const blocking = await Promise.all(
+    matches
+      .filter((match) => match.state !== "planned")
+      .map(async (match) => {
+        const [home, away, matchday] = await Promise.all([
+          ctx.db.get(match.homeTeamId),
+          ctx.db.get(match.awayTeamId),
+          ctx.db.get(match.matchdayId),
+        ]);
+        return {
+          number: matchday?.number ?? 0,
+          label: `J${matchday?.number ?? "?"} ${home?.name ?? "?"} – ${away?.name ?? "?"}`,
+        };
+      }),
+  );
+  return {
+    team,
+    matches,
+    roster,
+    managers,
+    blocking: blocking.sort((a, b) => a.number - b.number).map((match) => match.label),
+  };
+}
+
+export const removalImpact = query({
+  args: { teamId: v.id("teams") },
+  returns: v.object({
+    matches: v.number(),
+    rosterEntries: v.number(),
+    managers: v.number(),
+    blockingMatches: v.array(v.string()),
+  }),
+  handler: async (ctx, { teamId }) => {
+    await requireAdmin(ctx);
+    const { matches, roster, managers, blocking } = await removal(ctx, teamId);
+    return {
+      matches: matches.length,
+      rosterEntries: roster.length,
+      managers: managers.length,
+      blockingMatches: blocking,
+    };
+  },
+});
+
+/**
+ * Supprime une équipe engagée par erreur, avec ses matchs (tous Planifiés, et leur
+ * historique de négociation), sa feuille verte et ses rattachements de responsables.
+ * Refusée, en nommant les matchs, dès qu'un match a dépassé Planifié.
+ */
+export const remove = mutation({
+  args: { teamId: v.id("teams") },
+  returns: v.null(),
+  handler: async (ctx, { teamId }) => {
+    await requireAdmin(ctx);
+    const { team, matches, roster, managers, blocking } = await removal(ctx, teamId);
+    if (blocking.length > 0) {
+      throw new ConvexError(
+        `${team.name} ne peut pas être supprimée : ces matchs ont déjà un créneau ou une ` +
+          `feuille — ${blocking.join(", ")}.`,
+      );
+    }
+    for (const match of matches) {
+      // Un match revenu à Planifié après un refus ou un report garde son historique.
+      for (const table of ["slotProposals", "postponementRequests"] as const) {
+        const rows = await ctx.db
+          .query(table)
+          .withIndex("by_match", (q) => q.eq("matchId", match._id))
+          .collect();
+        for (const row of rows) {
+          await ctx.db.delete(row._id);
+        }
+      }
+      await ctx.db.delete(match._id);
+    }
+    for (const row of [...roster, ...managers]) {
+      await ctx.db.delete(row._id);
+    }
+    await ctx.db.delete(teamId);
+    return null;
   },
 });
 

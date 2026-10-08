@@ -15,7 +15,10 @@ type Ctx = QueryCtx | MutationCtx;
  */
 export async function getCurrentUser(ctx: Ctx): Promise<Doc<"users"> | null> {
   const userId = await getAuthUserId(ctx);
-  return userId === null ? null : await ctx.db.get(userId);
+  const user = userId === null ? null : await ctx.db.get(userId);
+  // Un jeton émis avant la suppression du compte reste lisible jusqu'à son expiration : il
+  // ne doit plus rien ouvrir.
+  return user === null || user.deletedAt !== undefined ? null : user;
 }
 
 /** Le compte appelant, ou une erreur si personne n'est connecté. */

@@ -173,6 +173,13 @@ export default function AdminPage() {
                 <Button type="submit" variant="outline">
                   Créer le circuit
                 </Button>
+                <p className="text-muted-foreground w-full text-xs">
+                  Un circuit regroupe les championnats où un licencié n&apos;a qu&apos;une seule
+                  feuille verte. Par exemple : <em>Championnat</em> (D1, D2, D3 et mixte),{" "}
+                  <em>Coupe</em>, <em>Féminin</em> — un même joueur peut ainsi avoir sa feuille
+                  verte en D2, une autre en coupe et une autre au féminin. Pour créer la coupe,
+                  créez d&apos;abord le circuit Coupe, puis le championnat Coupe de Corrèze dedans.
+                </p>
               </form>
 
               <div className="border-t pt-4">

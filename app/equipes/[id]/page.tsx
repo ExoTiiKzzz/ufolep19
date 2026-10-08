@@ -60,8 +60,15 @@ export default function TeamPage() {
     (myTeams ?? []).some((candidate) => candidate._id === teamId);
   // Recherche sur tous les licenciés du club, numéros périmés compris : on cherche avec la
   // carte qu'on a sous les yeux.
-  const found = (candidates ?? []).filter(
-    (player) => !player.onThisTeam && search.trim() !== "" && matchesPlayer(player, search),
+  //
+  // Sans recherche, la liste montre les licenciés encore disponibles — sans feuille verte
+  // dans le circuit — : elle se réduit à mesure qu'on remplit les feuilles vertes du club,
+  // et le dernier licencié sans équipe saute aux yeux.
+  const searching = search.trim() !== "";
+  const found = (candidates ?? []).filter((player) =>
+    searching
+      ? !player.onThisTeam && matchesPlayer(player, search)
+      : !player.onThisTeam && player.otherTeamName === null,
   );
   const rank = (standings ?? []).find((row) => row.teamId === teamId);
 
@@ -266,8 +273,10 @@ export default function TeamPage() {
             <CardHeader>
               <CardTitle className="text-base">Inscrire un licencié du club</CardTitle>
               <CardDescription>
-                Cherchez par nom ou par numéro de licence, même périmé. Un licencié déjà inscrit
-                sur une autre feuille verte du circuit doit d&apos;abord en être retiré.
+                Les licenciés du club sans feuille verte dans ce circuit sont listés ci-dessous.
+                Cherchez par nom ou par numéro de licence, même périmé, pour retrouver les
+                autres : un licencié déjà inscrit sur une autre feuille verte du circuit doit
+                d&apos;abord en être retiré.
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
@@ -278,10 +287,21 @@ export default function TeamPage() {
                 placeholder="Nom, prénom ou numéro de licence"
                 aria-label="Chercher un licencié du club"
               />
-              {search.trim() === "" ? null : found.length === 0 ? (
-                <p className="text-muted-foreground text-sm">Aucun licencié du club trouvé.</p>
+              {candidates === undefined ? null : found.length === 0 ? (
+                <p className="text-muted-foreground text-sm">
+                  {searching
+                    ? "Aucun licencié du club trouvé."
+                    : "Tous les licenciés du club ont déjà une feuille verte dans ce circuit."}
+                </p>
               ) : (
-                <div className="flex flex-col gap-1">
+                <div className="flex max-h-96 flex-col gap-1 overflow-y-auto">
+                  {searching ? null : (
+                    <p className="text-muted-foreground text-xs">
+                      {found.length > 1
+                        ? `${found.length} licenciés disponibles`
+                        : "1 licencié disponible"}
+                    </p>
+                  )}
                   {found.map((player) => (
                     <div key={player._id} className="flex flex-wrap items-center gap-2 text-sm">
                       <span className="font-medium">

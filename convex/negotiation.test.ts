@@ -13,6 +13,7 @@ import {
   setupChampionship,
   SLOT_AT,
   WINDOW_END,
+  WINDOW_START,
 } from "./test.setup";
 
 afterEach(() => {
@@ -92,18 +93,74 @@ test("un refus renvoie le match en attente de proposition, et la proposition res
   expect(history.proposals.map((proposal) => proposal.status)).toEqual(["pending", "rejected"]);
 });
 
-test("un créneau hors de la fenêtre de la journée est refusé", async () => {
+test("un créneau hors fenêtre est accepté, signalé, et sans validation tacite", async () => {
+  // Match retardé par arrangement entre les deux équipes (ADR-0006).
+  at(BEFORE_WINDOW);
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+  const late = WINDOW_END + 14 * 86_400_000;
+
+  const result = await t
+    .withIdentity({ subject: s.homeManager })
+    .mutation(api.negotiation.proposeSlot, { matchId: s.matchId, at: late, venue: VENUE });
+
+  expect(result).toEqual({ tacitDeadline: null, outsideWindow: true });
+  const match = await t.run(async (ctx) => ctx.db.get(s.matchId));
+  expect(match?.state).toBe("awaitingSlot");
+  expect(match?.tacitJobId).toBeUndefined();
+
+  const history = await t
+    .withIdentity({ subject: s.awayManager })
+    .query(api.negotiation.history, { matchId: s.matchId });
+  expect(history.proposals[0]).toMatchObject({ outsideWindow: true, deadline: null });
+
+  // Le visiteur consent : le créneau devient ferme, et reste signalé.
+  await t.withIdentity({ subject: s.awayManager }).mutation(api.negotiation.acceptSlot, {
+    matchId: s.matchId,
+  });
+  const after = await t
+    .withIdentity({ subject: s.awayManager })
+    .query(api.negotiation.history, { matchId: s.matchId });
+  expect(after.slotOutsideWindow).toBe(true);
+});
+
+test("un créneau dans la fenêtre n'est pas signalé", async () => {
   at(BEFORE_WINDOW);
   const t = convexTest(schema, modules);
   const s = await setupChampionship(t);
 
-  await expect(
-    t.withIdentity({ subject: s.homeManager }).mutation(api.negotiation.proposeSlot, {
-      matchId: s.matchId,
-      at: WINDOW_END + 86_400_000,
-      venue: VENUE,
-    }),
-  ).rejects.toThrow(/fenêtre de dates/i);
+  const result = await t
+    .withIdentity({ subject: s.homeManager })
+    .mutation(api.negotiation.proposeSlot, { matchId: s.matchId, at: SLOT_AT, venue: VENUE });
+
+  expect(result.outsideWindow).toBe(false);
+  expect(result.tacitDeadline).not.toBeNull();
+});
+
+test("déplacer la fenêtre ne touche pas un match confirmé, qui devient signalé", async () => {
+  at(BEFORE_WINDOW);
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+  await t
+    .withIdentity({ subject: s.homeManager })
+    .mutation(api.negotiation.proposeSlot, { matchId: s.matchId, at: SLOT_AT, venue: VENUE });
+  await t.withIdentity({ subject: s.awayManager }).mutation(api.negotiation.acceptSlot, {
+    matchId: s.matchId,
+  });
+
+  // La fenêtre est corrigée : elle s'arrête désormais avant le créneau.
+  await t.withIdentity({ subject: s.admin }).mutation(api.matchdays.updateWindow, {
+    matchdayId: s.matchdayId,
+    windowStart: WINDOW_START,
+    windowEnd: SLOT_AT - 86_400_000,
+  });
+
+  const match = await t.run(async (ctx) => ctx.db.get(s.matchId));
+  expect(match).toMatchObject({ state: "confirmed", slot: { at: SLOT_AT, venue: VENUE } });
+  const history = await t
+    .withIdentity({ subject: s.homeManager })
+    .query(api.negotiation.history, { matchId: s.matchId });
+  expect(history.slotOutsideWindow).toBe(true);
 });
 
 test("un créneau déjà passé est refusé", async () => {

@@ -20,3 +20,12 @@ L'absence de générateur n'est pas un oubli : ne pas l'ajouter en croyant compl
 contrepartie, la mutation de création de match porte les garde-fous que l'algorithme aurait donnés
 gratuitement — une équipe ne se rencontre pas elle-même, les deux équipes appartiennent au même
 championnat, et un doublon de paire avec le même receveur est signalé.
+
+## Addendum — reprise des matchs retour
+
+Une journée peut **reprendre en retour** une autre journée : ses matchs y sont recopiés, receveur
+et visiteur inversés. Ce n'est pas la génération écartée plus haut : rien n'est calculé, la copie
+ne fait que retourner un calendrier que l'administrateur a composé lui-même, avec les contraintes
+qu'il est seul à connaître. Il choisit journée par journée quelle journée aller devient quelle
+journée retour, de sorte que l'ordre des retours reste le sien. Les matchs copiés passent par les
+mêmes garde-fous qu'une création à la main.

@@ -44,6 +44,10 @@ export default function AdminChampionshipPage() {
   const createTeam = useMutation(api.teams.create);
   const createMatchday = useMutation(api.matchdays.create);
   const updatePlateau = useMutation(api.matchdays.updatePlateau);
+  const updateWindow = useMutation(api.matchdays.updateWindow);
+  const mirrorMatchday = useMutation(api.matches.mirrorMatchday);
+  const renameTeam = useMutation(api.teams.rename);
+  const removeTeam = useMutation(api.teams.remove);
   const createMatch = useMutation(api.matches.create);
   const updateChampionship = useMutation(api.championships.update);
 
@@ -131,16 +135,21 @@ export default function AdminChampionshipPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-col gap-1 text-sm">
             {(teams ?? []).length === 0 ? (
-              <p className="text-muted-foreground text-sm">Aucune équipe engagée.</p>
+              <p className="text-muted-foreground">Aucune équipe engagée.</p>
             ) : (
               (teams ?? []).map((team) => (
-                <Link key={team._id} href={`/equipes/${team._id}`}>
-                  <Badge variant="muted">
-                    {team.name} · {team.clubName}
-                  </Badge>
-                </Link>
+                <TeamAdminRow
+                  key={team._id}
+                  team={team}
+                  onRename={(name) =>
+                    guard(() => renameTeam({ teamId: team._id, name }), "Équipe renommée.")
+                  }
+                  onRemove={() =>
+                    guard(() => removeTeam({ teamId: team._id }), `${team.name} supprimée.`)
+                  }
+                />
               ))
             )}
           </div>
@@ -186,19 +195,52 @@ export default function AdminChampionshipPage() {
           <CardDescription>
             {isPlateau
               ? "Chaque journée est un plateau : une date, une heure et une salle communes à ses matchs. Pas de négociation de créneau."
-              : "La fenêtre de dates borne le créneau des matchs de la journée, et sert de date butoir de négociation."}
+              : "Le créneau des matchs est attendu dans la fenêtre de la journée. Un match avancé ou retardé par arrangement entre les équipes peut se jouer en dehors : il est alors signalé, et le visiteur doit valider explicitement."}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <div className="flex flex-col gap-1 text-sm">
             {(matchdays ?? []).map((matchday) =>
               matchday.plateau === undefined ? (
-                <p key={matchday._id}>
-                  <span className="font-medium">Journée {matchday.number}</span>{" "}
-                  <span className="text-muted-foreground">
-                    {formatWindow(matchday.windowStart, matchday.windowEnd)}
-                  </span>
-                </p>
+                <details key={matchday._id}>
+                  <summary className="cursor-pointer">
+                    <span className="font-medium">Journée {matchday.number}</span>{" "}
+                    <span className="text-muted-foreground">
+                      {formatWindow(matchday.windowStart, matchday.windowEnd)}
+                    </span>
+                  </summary>
+                  <WindowForm
+                    idPrefix={`window-${matchday._id}-`}
+                    initial={matchday}
+                    onSubmit={(window) =>
+                      guard(
+                        () => updateWindow({ matchdayId: matchday._id, ...window }),
+                        `Fenêtre de la journée ${matchday.number} modifiée. Ses matchs gardent leur créneau.`,
+                      )
+                    }
+                    onInvalid={() => setError("Dates de fenêtre invalides.")}
+                  />
+                  <MirrorForm
+                    idPrefix={`mirror-${matchday._id}-`}
+                    target={matchday}
+                    matchdays={matchdays ?? []}
+                    label="Journée"
+                    onSubmit={(sourceMatchdayId, sourceNumber) =>
+                      guard(async () => {
+                        const result = await mirrorMatchday({
+                          sourceMatchdayId,
+                          targetMatchdayId: matchday._id,
+                        });
+                        setNotice(
+                          [
+                            `${result.created} match${result.created > 1 ? "s" : ""} retour créé${result.created > 1 ? "s" : ""} en journée ${matchday.number}, depuis la journée ${sourceNumber}.`,
+                            ...result.duplicateWarnings,
+                          ].join(" "),
+                        );
+                      })
+                    }
+                  />
+                </details>
               ) : (
                 <details key={matchday._id}>
                   <summary className="cursor-pointer">
@@ -221,6 +263,26 @@ export default function AdminChampionshipPage() {
                           plateau,
                         });
                       }, "Plateau déplacé, avec ses matchs non joués.")
+                    }
+                  />
+                  <MirrorForm
+                    idPrefix={`mirror-${matchday._id}-`}
+                    target={matchday}
+                    matchdays={matchdays ?? []}
+                    label="Plateau"
+                    onSubmit={(sourceMatchdayId, sourceNumber) =>
+                      guard(async () => {
+                        const result = await mirrorMatchday({
+                          sourceMatchdayId,
+                          targetMatchdayId: matchday._id,
+                        });
+                        setNotice(
+                          [
+                            `${result.created} match${result.created > 1 ? "s" : ""} retour créé${result.created > 1 ? "s" : ""} au plateau ${matchday.number}, depuis le plateau ${sourceNumber}.`,
+                            ...result.duplicateWarnings,
+                          ].join(" "),
+                        );
+                      })
                     }
                   />
                 </details>
@@ -458,6 +520,208 @@ export default function AdminChampionshipPage() {
         </CardContent>
       </Card>
     </main>
+  );
+}
+
+/**
+ * Une équipe engagée, avec son renommage et sa suppression.
+ *
+ * La suppression s'annonce avant d'agir : ce qu'elle emporte (matchs, feuille verte,
+ * responsables), ou les matchs qui l'empêchent. L'impact n'est lu qu'à la demande.
+ */
+function TeamAdminRow({
+  team,
+  onRename,
+  onRemove,
+}: {
+  team: { _id: Id<"teams">; name: string; clubName: string };
+  onRename: (name: string) => Promise<void>;
+  onRemove: () => Promise<void>;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const impact = useQuery(api.teams.removalImpact, confirming ? { teamId: team._id } : "skip");
+  const plural = (count: number, noun: string, adjective = "") => {
+    const s = count > 1 ? "s" : "";
+    return `${count} ${noun}${s}${adjective === "" ? "" : ` ${adjective}${s}`}`;
+  };
+
+  return (
+    <details>
+      <summary className="cursor-pointer">
+        <span className="font-medium">{team.name}</span>{" "}
+        <span className="text-muted-foreground">{team.clubName}</span>{" "}
+        <Link href={`/equipes/${team._id}`} className="text-muted-foreground text-xs hover:underline">
+          fiche
+        </Link>
+      </summary>
+      <form
+        className="mt-2 flex flex-wrap items-end gap-3 border-t pt-4"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          await onRename(String(new FormData(event.currentTarget).get("name")));
+        }}
+      >
+        <div className="min-w-56 flex-1">
+          <Label htmlFor={`rename-${team._id}`}>Nom de l&apos;équipe</Label>
+          <Input
+            id={`rename-${team._id}`}
+            name="name"
+            className="mt-2"
+            required
+            defaultValue={team.name}
+          />
+        </div>
+        <Button type="submit" variant="outline">
+          Renommer
+        </Button>
+        {confirming ? null : (
+          <Button type="button" variant="ghost" onClick={() => setConfirming(true)}>
+            Supprimer…
+          </Button>
+        )}
+      </form>
+      {!confirming ? null : impact === undefined ? (
+        <p className="text-muted-foreground mt-3">Vérification…</p>
+      ) : impact.blockingMatches.length > 0 ? (
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <p>
+            {team.name} ne peut pas être supprimée : ces matchs ont déjà un créneau ou une
+            feuille — {impact.blockingMatches.join(", ")}. Le retrait d&apos;une équipe en
+            cours de saison passe par des forfaits.
+          </p>
+          <Button type="button" variant="ghost" onClick={() => setConfirming(false)}>
+            Fermer
+          </Button>
+        </div>
+      ) : (
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <p>
+            Supprimer {team.name} emporte {plural(impact.matches, "match", "planifié")},{" "}
+            {plural(impact.rosterEntries, "joueur")} sur la feuille verte et{" "}
+            {plural(impact.managers, "responsable", "rattaché")}. Les fiches des licenciés et
+            les comptes restent.
+          </p>
+          <Button type="button" variant="destructive" onClick={() => onRemove()}>
+            Supprimer définitivement
+          </Button>
+          <Button type="button" variant="ghost" onClick={() => setConfirming(false)}>
+            Annuler
+          </Button>
+        </div>
+      )}
+    </details>
+  );
+}
+
+/** Dates de la fenêtre d'une journée, préremplies. Déplacer la fenêtre ne touche aucun match. */
+function WindowForm({
+  idPrefix,
+  initial,
+  onSubmit,
+  onInvalid,
+}: {
+  idPrefix: string;
+  initial: { windowStart: number; windowEnd: number };
+  onSubmit: (window: { windowStart: number; windowEnd: number }) => Promise<void>;
+  onInvalid: () => void;
+}) {
+  return (
+    <form
+      className="mt-2 flex flex-wrap items-end gap-3 border-t pt-4"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        const form = new FormData(event.currentTarget);
+        const windowStart = parisDayBounds(String(form.get("start")), "start");
+        const windowEnd = parisDayBounds(String(form.get("end")), "end");
+        if (windowStart === null || windowEnd === null) {
+          onInvalid();
+          return;
+        }
+        await onSubmit({ windowStart, windowEnd });
+      }}
+    >
+      <div>
+        <Label htmlFor={`${idPrefix}start`}>Début de fenêtre</Label>
+        <Input
+          id={`${idPrefix}start`}
+          name="start"
+          type="date"
+          className="mt-2"
+          required
+          defaultValue={dateInputValue(initial.windowStart)}
+        />
+      </div>
+      <div>
+        <Label htmlFor={`${idPrefix}end`}>Fin de fenêtre</Label>
+        <Input
+          id={`${idPrefix}end`}
+          name="end"
+          type="date"
+          className="mt-2"
+          required
+          defaultValue={dateInputValue(initial.windowEnd)}
+        />
+      </div>
+      <Button type="submit" variant="outline">
+        Modifier la fenêtre
+      </Button>
+    </form>
+  );
+}
+
+/**
+ * Reprise en retour : les matchs d'une autre journée sont recopiés dans celle-ci, receveur
+ * et visiteur inversés. L'administrateur choisit la journée aller — l'ordre des retours
+ * reste le sien (ADR-0001, addendum).
+ */
+function MirrorForm({
+  idPrefix,
+  target,
+  matchdays,
+  label,
+  onSubmit,
+}: {
+  idPrefix: string;
+  target: { _id: Id<"matchdays">; number: number };
+  matchdays: { _id: Id<"matchdays">; number: number }[];
+  label: string;
+  onSubmit: (sourceMatchdayId: Id<"matchdays">, sourceNumber: number) => Promise<void>;
+}) {
+  const sources = matchdays.filter((matchday) => matchday._id !== target._id);
+  if (sources.length === 0) {
+    return null;
+  }
+  return (
+    <form
+      className="mt-2 flex flex-wrap items-end gap-3 border-t pt-4"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        const sourceId = String(new FormData(event.currentTarget).get("source"));
+        const source = sources.find((matchday) => matchday._id === sourceId);
+        if (source !== undefined) {
+          await onSubmit(source._id, source.number);
+        }
+      }}
+    >
+      <div>
+        <Label htmlFor={`${idPrefix}source`}>Reprendre en retour</Label>
+        <Select id={`${idPrefix}source`} name="source" className="mt-2" required>
+          <option value="">Choisir…</option>
+          {sources.map((matchday) => (
+            <option key={matchday._id} value={matchday._id}>
+              {label} {matchday.number}
+            </option>
+          ))}
+        </Select>
+      </div>
+      <Button type="submit" variant="outline">
+        Créer les matchs retour
+      </Button>
+      <p className="text-muted-foreground w-full text-xs">
+        Les matchs {label === "Plateau" ? "du plateau choisi" : "de la journée choisie"} sont
+        recréés ici, receveur et visiteur inversés.
+      </p>
+    </form>
   );
 }
 

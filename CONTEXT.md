@@ -26,6 +26,8 @@ _Avoid_: carte, adhésion, affiliation, numéro de licencié
 **Compte** (`user`):
 Identité de connexion, portant un rôle unique (`player`, `manager`, `admin`). Un compte de rôle
 `player` peut être rattaché à une fiche Joueur, mais une fiche Joueur n'a pas besoin de compte.
+Un compte supprimé ne permet plus de se connecter et libère son adresse, mais son nom reste
+attaché aux actes qu'il a posés dans l'historique des matchs.
 _Avoid_: utilisateur, profil, login
 
 **Équipe** (`team`):
@@ -102,8 +104,9 @@ résultats.
 _Avoid_: tournoi, rassemblement, regroupement
 
 **Fenêtre** (`window`):
-Intervalle de dates d'une journée, à l'intérieur duquel le créneau d'un match doit tomber. Elle
-fait office de date butoir pour la négociation.
+Intervalle de dates d'une journée, à l'intérieur duquel le créneau d'un match est attendu. Ce
+n'est pas une borne stricte : un match avancé ou retardé par arrangement entre les deux équipes
+se joue hors fenêtre, et son créneau est alors signalé, jamais refusé.
 _Avoid_: période, plage, délai
 
 **Receveur** (`homeTeam`):
@@ -133,7 +136,8 @@ _Avoid_: réclamation, conflit, contestation
 **Validation tacite** (`tacitApproval`):
 Acceptation automatique d'une proposition ou d'un score resté sans réponse. Elle intervient 7
 jours après la soumission, et au plus tard la veille du créneau proposé. Elle n'est pas programmée
-du tout s'il reste moins de 24 h pour réagir : la validation explicite devient alors obligatoire.
+du tout s'il reste moins de 24 h pour réagir, ni pour un créneau proposé hors de la fenêtre de sa
+journée : la validation explicite devient alors obligatoire.
 _Avoid_: accord implicite, auto-validation, expiration
 
 **Forfait** (`forfeit`):

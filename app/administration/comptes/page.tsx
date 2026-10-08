@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/table";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
+import { accountNotice } from "@/lib/account-notice";
 import { errorMessage } from "@/lib/errors";
 import { roleLabels, type Role } from "@/lib/roles";
 
@@ -28,10 +29,18 @@ export default function AccountsPage() {
   const setRole = useMutation(api.users.setRole);
   const addManager = useMutation(api.teams.addManager);
   const removeManager = useMutation(api.teams.removeManager);
+  const resetPassword = useAction(api.admin.resetPassword);
+  const removeAccount = useMutation(api.users.remove);
+  const me = useQuery(api.users.me);
   const season = useQuery(api.seasons.current);
-  const championships = useQuery(
-    api.championships.listBySeason,
+  const seasonTeams = useQuery(
+    api.teams.listBySeason,
     season ? { seasonId: season._id } : "skip",
+  );
+  // Une seule ligne à la fois en attente de confirmation : réinitialiser ou supprimer coupe
+  // l'accès de quelqu'un.
+  const [pending, setPending] = useState<{ userId: string; action: "reset" | "remove" } | null>(
+    null,
   );
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -65,7 +74,9 @@ export default function AccountsPage() {
         <CardHeader>
           <CardTitle className="text-base">Créer un compte</CardTitle>
           <CardDescription>
-            Mot de passe de 8 caractères minimum, à transmettre à la personne concernée.
+            Le mot de passe est généré et envoyé à la personne. S&apos;il ne part pas, il
+            s&apos;affiche ici une seule fois : transmettez-le-lui. Elle le remplace ensuite
+            depuis « Mon compte ».
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -76,19 +87,13 @@ export default function AccountsPage() {
               const form = new FormData(event.currentTarget);
               const element = event.currentTarget;
               await guard(async () => {
-                const { mail } = await createAccount({
+                const { account } = await createAccount({
                   email: String(form.get("email")),
-                  password: String(form.get("password")),
                   name: String(form.get("name")),
                   role: String(form.get("role")) as Role,
                 });
                 element.reset();
-                setNotice(
-                  mail.sent
-                    ? "Compte créé, et ses identifiants lui ont été envoyés par e-mail."
-                    : `Compte créé, mais le message n'est pas parti (${mail.error}) : ` +
-                      "transmettez-lui son mot de passe vous-même.",
-                );
+                setNotice(accountNotice("Compte créé.", account, "account"));
               });
             }}
           >
@@ -99,10 +104,6 @@ export default function AccountsPage() {
             <div className="min-w-48 flex-1">
               <Label htmlFor="email">E-mail</Label>
               <Input id="email" name="email" type="email" className="mt-2" required />
-            </div>
-            <div>
-              <Label htmlFor="password">Mot de passe</Label>
-              <Input id="password" name="password" className="mt-2" required minLength={8} />
             </div>
             <div>
               <Label htmlFor="role">Rôle</Label>
@@ -135,9 +136,69 @@ export default function AccountsPage() {
               {(accounts ?? []).map((row) => (
                 <TableRow key={row._id}>
                   <TableCell className="font-medium">{row.name ?? "—"}</TableCell>
-                  <TableCell className="text-muted-foreground">{row.email ?? "—"}</TableCell>
+                  <TableCell>
+                    <span className="text-muted-foreground">{row.email ?? "—"}</span>
+                    {pending?.userId !== row._id ? (
+                      <div className="-ml-3 flex flex-wrap">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setPending({ userId: row._id, action: "reset" })}
+                        >
+                          Nouveau mot de passe
+                        </Button>
+                        {row._id === me?._id ? null : (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setPending({ userId: row._id, action: "remove" })}
+                          >
+                            Supprimer
+                          </Button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="mt-1 flex flex-col gap-2">
+                        <p className="text-xs">
+                          {pending.action === "reset"
+                            ? "L'actuel mot de passe cessera de fonctionner et ses sessions seront fermées."
+                            : "Plus aucune connexion, adresse libérée. Son nom reste dans l'historique des matchs."}
+                        </p>
+                        <div className="flex gap-1">
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() =>
+                              guard(async () => {
+                                setPending(null);
+                                if (pending.action === "reset") {
+                                  const account = await resetPassword({ userId: row._id });
+                                  setNotice(
+                                    accountNotice(
+                                      `Nouveau mot de passe attribué à ${row.name ?? account.email}.`,
+                                      account,
+                                      "account",
+                                    ),
+                                  );
+                                } else {
+                                  await removeAccount({ userId: row._id });
+                                  setNotice(`Compte de ${row.name ?? row.email} supprimé.`);
+                                }
+                              })
+                            }
+                          >
+                            {pending.action === "reset" ? "Confirmer" : "Supprimer"}
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => setPending(null)}>
+                            Annuler
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </TableCell>
                   <TableCell>
                     <Select
+                      className="min-w-36"
                       value={row.role}
                       onChange={(event) =>
                         guard(
@@ -173,14 +234,12 @@ export default function AccountsPage() {
                         </Badge>
                       ))}
                       {row.role === "player" ? null : (
-                        <ChampionshipTeamPicker
+                        <SeasonTeamPicker
                           value={attachTo[row._id] ?? ""}
                           onChange={(value) =>
                             setAttachTo((previous) => ({ ...previous, [row._id]: value }))
                           }
-                          championshipIds={(championships ?? []).map(
-                            (championship) => championship._id,
-                          )}
+                          teams={seasonTeams ?? []}
                           onAttach={(teamId) =>
                             guard(
                               () => addManager({ teamId, userId: row._id }),
@@ -201,30 +260,34 @@ export default function AccountsPage() {
   );
 }
 
-/** Sélecteur d'équipe parmi tous les championnats de la saison courante. */
-function ChampionshipTeamPicker({
+/**
+ * Sélecteur d'équipe parmi toutes celles de la saison courante, groupées par championnat :
+ * un même club a souvent une équipe en D1 et une au mixte, et une liste à plat les
+ * confondrait.
+ */
+function SeasonTeamPicker({
   value,
   onChange,
-  championshipIds,
+  teams,
   onAttach,
 }: {
   value: string;
   onChange: (value: string) => void;
-  championshipIds: Id<"championships">[];
+  teams: { _id: Id<"teams">; name: string; championshipId: string; championshipName: string }[];
   onAttach: (teamId: Id<"teams">) => void;
 }) {
-  const first = useQuery(
-    api.teams.listByChampionship,
-    championshipIds[0] ? { championshipId: championshipIds[0] } : "skip",
-  );
-  const second = useQuery(
-    api.teams.listByChampionship,
-    championshipIds[1] ? { championshipId: championshipIds[1] } : "skip",
-  );
-  const teams = [...(first ?? []), ...(second ?? [])];
-
   if (teams.length === 0) {
     return null;
+  }
+  // `listBySeason` trie déjà par championnat : il suffit de couper aux changements.
+  const groups: { name: string; teams: typeof teams }[] = [];
+  for (const team of teams) {
+    const last = groups.at(-1);
+    if (last !== undefined && last.name === team.championshipName) {
+      last.teams.push(team);
+    } else {
+      groups.push({ name: team.championshipName, teams: [team] });
+    }
   }
   return (
     <span className="flex items-center gap-1">
@@ -235,10 +298,14 @@ function ChampionshipTeamPicker({
         onChange={(event) => onChange(event.target.value)}
       >
         <option value="">Rattacher…</option>
-        {teams.map((team) => (
-          <option key={team._id} value={team._id}>
-            {team.name}
-          </option>
+        {groups.map((group) => (
+          <optgroup key={group.name} label={group.name}>
+            {group.teams.map((team) => (
+              <option key={team._id} value={team._id}>
+                {team.name}
+              </option>
+            ))}
+          </optgroup>
         ))}
       </Select>
       <Button

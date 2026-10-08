@@ -1,4 +1,4 @@
-import { accountCreatedEmail } from "../lib/rules/account-email";
+import { accountCreatedEmail, type AccountEmailKind } from "../lib/rules/account-email";
 
 /**
  * Envoi de messages par l'API HTTP de Brevo.
@@ -102,15 +102,20 @@ async function post(
   }
 }
 
-/** Annonce à une personne la création de son compte, mot de passe compris. */
+/**
+ * Annonce à une personne la création de son compte — ou, `kind: "reset"`, le nouveau mot
+ * de passe qu'un administrateur vient de lui attribuer —, mot de passe compris.
+ */
 export async function sendAccountCreated({
   to,
   name,
   password,
+  kind = "created",
 }: {
   to: string;
   name: string;
   password: string;
+  kind?: AccountEmailKind;
 }): Promise<MailResult> {
   const config = mailConfig();
   if (!config.ok) {
@@ -121,6 +126,7 @@ export async function sendAccountCreated({
     email: to,
     password,
     siteUrl: config.siteUrl,
+    kind,
   });
   return await post(config, {
     to,

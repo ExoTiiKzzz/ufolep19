@@ -77,9 +77,15 @@ export function SiteNav() {
             </Link>
           ) : (
             <>
-              <span className="text-primary-foreground/80 hidden text-sm sm:inline">
-                {account.name ?? account.email}
-              </span>
+              {/* Le nom mène à « Mon compte », où l'on change son mot de passe. */}
+              <Link
+                href="/mon-compte"
+                className="text-primary-foreground/80 text-sm hover:underline"
+                title="Mon compte"
+              >
+                <span className="hidden sm:inline">{account.name ?? account.email}</span>
+                <span className="sm:hidden">Mon compte</span>
+              </Link>
               <span className="bg-primary-foreground/15 text-primary-foreground rounded-md px-2 py-0.5 text-xs font-medium">
                 {roleLabels[account.role]}
               </span>

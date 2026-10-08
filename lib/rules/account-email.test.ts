@@ -34,3 +34,15 @@ test("le HTML échappe ce qui vient des données", () => {
   expect(mail.html).not.toContain("<script>");
   expect(mail.html).toContain("&lt;script&gt;");
 });
+
+test("le message de réinitialisation annonce un nouveau mot de passe, pas un nouveau compte", () => {
+  const mail = accountCreatedEmail({ ...base, kind: "reset" });
+  expect(mail.subject).toMatch(/nouveau mot de passe/);
+  expect(mail.text).toContain(base.password);
+  expect(mail.text).toMatch(/L'ancien ne fonctionne plus/);
+  expect(mail.text).not.toMatch(/vient de vous être créé/);
+});
+
+test("le message invite à remplacer le mot de passe provisoire", () => {
+  expect(accountCreatedEmail(base).text).toMatch(/Mon compte/);
+});

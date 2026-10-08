@@ -66,6 +66,9 @@ export default defineSchema({
     // Rattachement facultatif à une fiche Joueur : un compte peut consulter « ses »
     // matchs, mais une fiche Joueur n'a pas besoin de compte.
     playerId: v.optional(v.id("players")),
+    // Compte supprimé : identifiants, adresse et rattachements sont partis, la ligne reste
+    // parce que l'historique des matchs y renvoie (qui a proposé, saisi, tranché).
+    deletedAt: v.optional(v.number()),
   })
     // Index attendus par Convex Auth.
     .index("email", ["email"])

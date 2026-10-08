@@ -140,8 +140,10 @@ export function ChampionshipSettingsForm({
         </div>
       </div>
       <p className="text-muted-foreground text-xs">
-        Un licencié n&apos;a qu&apos;une feuille verte par circuit. Niveau 1 = le plus fort : un
-        joueur qui monte d&apos;un niveau est un renfort, signalé au-delà de 3 matchs.
+        Le circuit regroupe les championnats où un licencié n&apos;a qu&apos;une feuille verte :
+        D1, D2, D3 et mixte partagent le même ; la coupe et le féminin ont chacun le leur.
+        Niveau 1 = le plus fort : un joueur qui monte d&apos;un niveau est un renfort, signalé
+        au-delà de 3 matchs.
         {formatLocked ? " Le format ne se change plus : des journées existent." : ""}
       </p>
 

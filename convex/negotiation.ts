@@ -7,6 +7,7 @@ import {
   type MatchTransition,
 } from "../lib/rules/match-lifecycle";
 import { slotTacitDeadline } from "../lib/rules/tacit";
+import { isOutsideWindow } from "../lib/rules/window";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
@@ -17,6 +18,7 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 import { managedTeamIds, requireAdmin, requireUser } from "./authz";
+import { accountName } from "./users";
 
 type Ctx = QueryCtx | MutationCtx;
 
@@ -124,13 +126,19 @@ async function pendingPostponement(ctx: Ctx, matchId: Id<"matches">) {
 /**
  * Le receveur propose un créneau.
  *
- * Rend l'échéance de validation tacite, ou `null` quand le créneau est trop proche pour
- * qu'un silence vaille accord : la validation explicite du visiteur devient alors
- * obligatoire.
+ * Le créneau est attendu dans la fenêtre de la journée, sans y être tenu : un match avancé
+ * ou retardé par arrangement se joue hors fenêtre, et y est signalé (ADR-0006).
+ *
+ * Rend l'échéance de validation tacite, ou `null` quand un silence ne vaut pas accord —
+ * créneau trop proche, ou hors fenêtre : la validation explicite du visiteur devient alors
+ * obligatoire. `outsideWindow` dit lequel des deux, pour que le receveur sache pourquoi.
  */
 export const proposeSlot = mutation({
   args: { matchId: v.id("matches"), at: v.number(), venue: v.string() },
-  returns: v.object({ tacitDeadline: v.union(v.number(), v.null()) }),
+  returns: v.object({
+    tacitDeadline: v.union(v.number(), v.null()),
+    outsideWindow: v.boolean(),
+  }),
   handler: async (ctx, args) => {
     const match = await mustGetMatch(ctx, args.matchId);
     await assertNegotiable(ctx, match);
@@ -140,11 +148,6 @@ export const proposeSlot = mutation({
     const matchday = await ctx.db.get(match.matchdayId);
     if (matchday === null) {
       throw new ConvexError("Journée inconnue.");
-    }
-    if (args.at < matchday.windowStart || args.at > matchday.windowEnd) {
-      throw new ConvexError(
-        "Le créneau doit tomber dans la fenêtre de dates de la journée.",
-      );
     }
     const venue = args.venue.trim();
     if (venue === "") {
@@ -156,7 +159,7 @@ export const proposeSlot = mutation({
     }
 
     await cancelTacit(ctx, match);
-    const deadline = slotTacitDeadline(now, args.at);
+    const deadline = slotTacitDeadline(now, args.at, matchday);
     const proposalId = await ctx.db.insert("slotProposals", {
       matchId: args.matchId,
       at: args.at,
@@ -174,7 +177,7 @@ export const proposeSlot = mutation({
           });
 
     await ctx.db.patch(args.matchId, { state: to, tacitJobId });
-    return { tacitDeadline: deadline };
+    return { tacitDeadline: deadline, outsideWindow: isOutsideWindow(args.at, matchday) };
   },
 });
 
@@ -391,6 +394,8 @@ export const history = query({
           v.literal("cancelled"),
         ),
         deadline: v.union(v.number(), v.null()),
+        // Signalement (ADR-0006), recalculé à la lecture : il suit un déplacement de fenêtre.
+        outsideWindow: v.boolean(),
       }),
     ),
     postponements: v.array(
@@ -412,6 +417,8 @@ export const history = query({
     iAmAdmin: v.boolean(),
     // Salle par défaut du club receveur, pour préremplir la proposition de créneau.
     defaultVenue: v.string(),
+    // Le créneau ferme du match tombe hors de la fenêtre de sa journée (ADR-0006).
+    slotOutsideWindow: v.boolean(),
   }),
   handler: async (ctx, { matchId }) => {
     const match = await mustGetMatch(ctx, matchId);
@@ -426,10 +433,8 @@ export const history = query({
       .withIndex("by_match", (q) => q.eq("matchId", matchId))
       .collect();
 
-    const nameOf = async (userId: Id<"users">) => {
-      const user = await ctx.db.get(userId);
-      return user?.name ?? user?.email ?? "Compte supprimé";
-    };
+    const matchday = await ctx.db.get(match.matchdayId);
+    const outside = (at: number) => matchday !== null && isOutsideWindow(at, matchday);
 
     return {
       proposals: await Promise.all(
@@ -439,9 +444,10 @@ export const history = query({
             _id: proposal._id,
             at: proposal.at,
             venue: proposal.venue,
-            proposedByName: await nameOf(proposal.proposedBy),
+            proposedByName: await accountName(ctx, proposal.proposedBy),
             status: proposal.status,
             deadline: proposal.deadline ?? null,
+            outsideWindow: outside(proposal.at),
           })),
       ),
       postponements: await Promise.all(
@@ -449,7 +455,7 @@ export const history = query({
           .sort((a, b) => b._creationTime - a._creationTime)
           .map(async (request) => ({
             _id: request._id,
-            requestedByName: await nameOf(request.requestedBy),
+            requestedByName: await accountName(ctx, request.requestedBy),
             reason: request.reason,
             status: request.status,
             requestedByMe: request.requestedBy === sides.user._id,
@@ -459,6 +465,8 @@ export const history = query({
       iAmAway: sides.isAway,
       iAmAdmin: sides.isAdmin,
       defaultVenue: await homeVenue(ctx, match),
+      slotOutsideWindow:
+        match.slot !== undefined && matchday?.plateau === undefined && outside(match.slot.at),
     };
   },
 });

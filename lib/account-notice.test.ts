@@ -49,3 +49,14 @@ test("le début du message vient de l'appelant", () => {
     "Joueur ajouté à l'effectif.",
   );
 });
+
+test("sur l'écran des comptes, le message ne répète pas que le compte est créé", () => {
+  const notice = accountNotice(
+    "Nouveau mot de passe attribué.",
+    { ...base, mail: { sent: false, error: "MAIL_SENDER_EMAIL manquante" } },
+    "account",
+  );
+  expect(notice).not.toContain("Compte créé");
+  expect(notice).toContain("Le message à camille@club-a.fr n'est pas parti");
+  expect(notice).toContain(base.temporaryPassword);
+});

@@ -8,6 +8,7 @@ import {
   normalizeLicenseNumber,
   validateLicense,
 } from "../lib/rules/license";
+import { temporaryPassword } from "../lib/rules/password";
 import { matchesPlayer } from "../lib/rules/player-search";
 import { internal } from "./_generated/api";
 import type { DataModel, Doc, Id } from "./_generated/dataModel";
@@ -137,18 +138,6 @@ export const linkExistingAccount = internalMutation({
     return null;
   },
 });
-
-/**
- * Mot de passe provisoire lisible : quatre groupes de quatre caractères, sans les glyphes
- * qu'on confond en le recopiant (0/O, 1/l/I).
- */
-function temporaryPassword(): string {
-  const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  const chars = [...bytes].map((byte) => alphabet[byte % alphabet.length]);
-  return [0, 4, 8, 12].map((start) => chars.slice(start, start + 4).join("")).join("-");
-}
 
 /**
  * Crée une fiche joueur et, si une adresse e-mail est renseignée, le **compte de

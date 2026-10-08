@@ -1,4 +1,4 @@
-import { convexTest } from "convex-test";
+import { convexTest, type TestConvex } from "convex-test";
 import { expect, test } from "vitest";
 
 import { api } from "./_generated/api";
@@ -165,4 +165,138 @@ test("seul un administrateur saisit le calendrier", async () => {
       awayTeamId: s.awayTeamId,
     }),
   ).rejects.toThrow(/réservée aux administrateurs/i);
+});
+
+/** Une journée 2 vide, et une troisième équipe pour que la J1 compte deux matchs. */
+async function withReturnLeg(
+  t: TestConvex<typeof schema>,
+  s: Awaited<ReturnType<typeof setupChampionship>>,
+) {
+  return await t.run(async (ctx) => {
+    const thirdTeamId = await ctx.db.insert("teams", {
+      clubId: s.homeClubId,
+      seasonId: s.seasonId,
+      championshipId: s.championshipId,
+      name: "Club A 2",
+    });
+    await ctx.db.insert("matches", {
+      championshipId: s.championshipId,
+      matchdayId: s.matchdayId,
+      homeTeamId: thirdTeamId,
+      awayTeamId: s.awayTeamId,
+      state: "completed",
+    });
+    const returnDayId = await ctx.db.insert("matchdays", {
+      championshipId: s.championshipId,
+      number: 8,
+      windowStart: WINDOW_END + 86_400_000,
+      windowEnd: WINDOW_END + 14 * 86_400_000,
+    });
+    return { thirdTeamId, returnDayId };
+  });
+}
+
+test("reprendre une journée en retour recopie ses matchs, receveur et visiteur inversés", async () => {
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+  const { thirdTeamId, returnDayId } = await withReturnLeg(t, s);
+
+  const result = await t
+    .withIdentity({ subject: s.admin })
+    .mutation(api.matches.mirrorMatchday, {
+      sourceMatchdayId: s.matchdayId,
+      targetMatchdayId: returnDayId,
+    });
+
+  expect(result).toEqual({ created: 2, duplicateWarnings: [] });
+  const created = await t.run(async (ctx) =>
+    ctx.db
+      .query("matches")
+      .withIndex("by_matchday", (q) => q.eq("matchdayId", returnDayId))
+      .collect(),
+  );
+  // Les matchs retour naissent Planifiés, quel que soit l'état de leur match aller.
+  expect(
+    created.map((match) => [match.homeTeamId, match.awayTeamId, match.state]).sort(),
+  ).toEqual(
+    [
+      [s.awayTeamId, s.homeTeamId, "planned"],
+      [s.awayTeamId, thirdTeamId, "planned"],
+    ].sort(),
+  );
+});
+
+test("reprendre deux fois la même journée ne duplique rien", async () => {
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+  const { returnDayId } = await withReturnLeg(t, s);
+  const admin = t.withIdentity({ subject: s.admin });
+  const args = { sourceMatchdayId: s.matchdayId, targetMatchdayId: returnDayId };
+
+  await admin.mutation(api.matches.mirrorMatchday, args);
+  await expect(admin.mutation(api.matches.mirrorMatchday, args)).rejects.toThrow(
+    /déjà été reprise/,
+  );
+  const count = await t.run(
+    async (ctx) =>
+      (
+        await ctx.db
+          .query("matches")
+          .withIndex("by_matchday", (q) => q.eq("matchdayId", returnDayId))
+          .collect()
+      ).length,
+  );
+  expect(count).toBe(2);
+});
+
+test("une journée ne se reprend pas depuis un autre championnat, ni sur elle-même", async () => {
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+  const admin = t.withIdentity({ subject: s.admin });
+  const otherDayId = await t.run(async (ctx) => {
+    const championshipId = await insertChampionship(ctx, { seasonId: s.seasonId, name: "D1" });
+    return await ctx.db.insert("matchdays", {
+      championshipId,
+      number: 1,
+      windowStart: WINDOW_START,
+      windowEnd: WINDOW_END,
+    });
+  });
+
+  await expect(
+    admin.mutation(api.matches.mirrorMatchday, {
+      sourceMatchdayId: s.matchdayId,
+      targetMatchdayId: otherDayId,
+    }),
+  ).rejects.toThrow(/même championnat/);
+  await expect(
+    admin.mutation(api.matches.mirrorMatchday, {
+      sourceMatchdayId: s.matchdayId,
+      targetMatchdayId: s.matchdayId,
+    }),
+  ).rejects.toThrow(/sur elle-même/);
+});
+
+test("une journée sans match ne se reprend pas", async () => {
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+  const { returnDayId } = await withReturnLeg(t, s);
+  await expect(
+    t.withIdentity({ subject: s.admin }).mutation(api.matches.mirrorMatchday, {
+      sourceMatchdayId: returnDayId,
+      targetMatchdayId: s.matchdayId,
+    }),
+  ).rejects.toThrow(/aucun match/);
+});
+
+test("seul l'administrateur reprend une journée en retour", async () => {
+  const t = convexTest(schema, modules);
+  const s = await setupChampionship(t);
+  const { returnDayId } = await withReturnLeg(t, s);
+  await expect(
+    t.withIdentity({ subject: s.homeManager }).mutation(api.matches.mirrorMatchday, {
+      sourceMatchdayId: s.matchdayId,
+      targetMatchdayId: returnDayId,
+    }),
+  ).rejects.toThrow(/réservée aux administrateurs/);
 });

@@ -1,7 +1,7 @@
 import { ConvexError, v } from "convex/values";
 
 import type { Doc, Id } from "./_generated/dataModel";
-import { mutation, query, type QueryCtx } from "./_generated/server";
+import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { attachedTeamIds, managedTeamIds, requireAdmin, requireUser } from "./authz";
 import { matchResult, matchState, slot } from "./schema";
 
@@ -115,12 +115,67 @@ export const listByChampionship = query({
 });
 
 /**
- * Crée un match dans une journée.
+ * Insère un match dans une journée, avec les garde-fous du calendrier saisi à la main
+ * (ADR-0001) : pas d'équipe contre elle-même, deux équipes du championnat de la journée.
+ * Le doublon de paire est **signalé sans bloquer** — un championnat peut légitimement
+ * programmer deux fois la même affiche.
  *
- * Le calendrier est saisi à la main (ADR-0001) : cette mutation porte donc les garde-fous
- * qu'un générateur aurait donnés gratuitement. Le doublon de paire est **signalé sans
- * bloquer** — un championnat peut légitimement programmer deux fois la même affiche.
+ * Partagé par la création à la main et par la reprise en retour d'une journée, pour qu'un
+ * match copié ne passe pas par des règles plus lâches qu'un match saisi.
  */
+async function insertMatch(
+  ctx: MutationCtx,
+  matchday: Doc<"matchdays">,
+  homeTeamId: Id<"teams">,
+  awayTeamId: Id<"teams">,
+) {
+  if (homeTeamId === awayTeamId) {
+    throw new ConvexError("Une équipe ne peut pas se rencontrer elle-même.");
+  }
+  const [homeTeam, awayTeam] = await Promise.all([
+    ctx.db.get(homeTeamId),
+    ctx.db.get(awayTeamId),
+  ]);
+  if (homeTeam === null || awayTeam === null) {
+    throw new ConvexError("Équipe inconnue.");
+  }
+  for (const team of [homeTeam, awayTeam]) {
+    if (team.championshipId !== matchday.championshipId) {
+      throw new ConvexError(`L'équipe ${team.name} n'est pas engagée dans ce championnat.`);
+    }
+  }
+
+  const sameChampionship = await ctx.db
+    .query("matches")
+    .withIndex("by_championship", (q) => q.eq("championshipId", matchday.championshipId))
+    .collect();
+  const duplicate = sameChampionship.find(
+    (match) => match.homeTeamId === homeTeamId && match.awayTeamId === awayTeamId,
+  );
+
+  // Plateau : pas de négociation, le match naît confirmé à la date et dans la salle du
+  // plateau. Une équipe y joue autant de matchs que l'administrateur en programme.
+  const matchId = await ctx.db.insert("matches", {
+    championshipId: matchday.championshipId,
+    matchdayId: matchday._id,
+    homeTeamId,
+    awayTeamId,
+    ...(matchday.plateau === undefined
+      ? { state: "planned" as const }
+      : { state: "confirmed" as const, slot: matchday.plateau }),
+  });
+
+  return {
+    matchId,
+    duplicateWarning:
+      duplicate === undefined
+        ? null
+        : `${homeTeam.name} reçoit déjà ${awayTeam.name} dans ce championnat. ` +
+          "Le match a été créé quand même.",
+  };
+}
+
+/** Crée un match dans une journée. */
 export const create = mutation({
   args: {
     matchdayId: v.id("matchdays"),
@@ -133,57 +188,96 @@ export const create = mutation({
   }),
   handler: async (ctx, args) => {
     await requireAdmin(ctx);
-    if (args.homeTeamId === args.awayTeamId) {
-      throw new ConvexError("Une équipe ne peut pas se rencontrer elle-même.");
-    }
     const matchday = await ctx.db.get(args.matchdayId);
     if (matchday === null) {
       throw new ConvexError("Journée inconnue.");
     }
-    const [homeTeam, awayTeam] = await Promise.all([
-      ctx.db.get(args.homeTeamId),
-      ctx.db.get(args.awayTeamId),
-    ]);
-    if (homeTeam === null || awayTeam === null) {
-      throw new ConvexError("Équipe inconnue.");
+    return await insertMatch(ctx, matchday, args.homeTeamId, args.awayTeamId);
+  },
+});
+
+/**
+ * Reprend en retour une journée : chacun de ses matchs est recréé dans la journée cible,
+ * receveur et visiteur inversés.
+ *
+ * Ce n'est pas une génération de calendrier (ADR-0001, addendum) : la copie retourne un
+ * calendrier que l'administrateur a composé, et c'est lui qui choisit, journée par journée,
+ * quelle journée aller devient quelle journée retour. La copie est refusée en bloc si l'un
+ * des matchs retournés figure déjà dans la cible : relancer l'action par erreur ne
+ * duplique rien, et une copie à moitié faite n'existe pas.
+ */
+export const mirrorMatchday = mutation({
+  args: {
+    sourceMatchdayId: v.id("matchdays"),
+    targetMatchdayId: v.id("matchdays"),
+  },
+  returns: v.object({
+    created: v.number(),
+    duplicateWarnings: v.array(v.string()),
+  }),
+  handler: async (ctx, { sourceMatchdayId, targetMatchdayId }) => {
+    await requireAdmin(ctx);
+    if (sourceMatchdayId === targetMatchdayId) {
+      throw new ConvexError("Une journée ne se reprend pas en retour sur elle-même.");
     }
-    for (const team of [homeTeam, awayTeam]) {
-      if (team.championshipId !== matchday.championshipId) {
-        throw new ConvexError(
-          `L'équipe ${team.name} n'est pas engagée dans ce championnat.`,
-        );
+    const [source, target] = await Promise.all([
+      ctx.db.get(sourceMatchdayId),
+      ctx.db.get(targetMatchdayId),
+    ]);
+    if (source === null || target === null) {
+      throw new ConvexError("Journée inconnue.");
+    }
+    if (source.championshipId !== target.championshipId) {
+      throw new ConvexError("Les deux journées doivent appartenir au même championnat.");
+    }
+
+    const [outbound, existing] = await Promise.all(
+      [sourceMatchdayId, targetMatchdayId].map((matchdayId) =>
+        ctx.db
+          .query("matches")
+          .withIndex("by_matchday", (q) => q.eq("matchdayId", matchdayId))
+          .collect(),
+      ),
+    );
+    if (outbound.length === 0) {
+      throw new ConvexError(`La journée ${source.number} n'a aucun match à reprendre.`);
+    }
+
+    const already = outbound.filter((match) =>
+      existing.some(
+        (other) =>
+          other.homeTeamId === match.awayTeamId && other.awayTeamId === match.homeTeamId,
+      ),
+    );
+    if (already.length > 0) {
+      const names = await Promise.all(
+        already.map(async (match) => {
+          const [home, away] = await Promise.all([
+            ctx.db.get(match.awayTeamId),
+            ctx.db.get(match.homeTeamId),
+          ]);
+          return `${home?.name ?? "?"} – ${away?.name ?? "?"}`;
+        }),
+      );
+      throw new ConvexError(
+        `La journée ${target.number} contient déjà ${names.join(", ")} : ` +
+          `la journée ${source.number} y a sans doute déjà été reprise. Rien n'a été créé.`,
+      );
+    }
+
+    const duplicateWarnings: string[] = [];
+    for (const match of outbound) {
+      const { duplicateWarning } = await insertMatch(
+        ctx,
+        target,
+        match.awayTeamId,
+        match.homeTeamId,
+      );
+      if (duplicateWarning !== null) {
+        duplicateWarnings.push(duplicateWarning);
       }
     }
-
-    const sameChampionship = await ctx.db
-      .query("matches")
-      .withIndex("by_championship", (q) => q.eq("championshipId", matchday.championshipId))
-      .collect();
-    const duplicate = sameChampionship.find(
-      (match) =>
-        match.homeTeamId === args.homeTeamId && match.awayTeamId === args.awayTeamId,
-    );
-
-    // Plateau : pas de négociation, le match naît confirmé à la date et dans la salle du
-    // plateau. Une équipe y joue autant de matchs que l'administrateur en programme.
-    const matchId = await ctx.db.insert("matches", {
-      championshipId: matchday.championshipId,
-      matchdayId: args.matchdayId,
-      homeTeamId: args.homeTeamId,
-      awayTeamId: args.awayTeamId,
-      ...(matchday.plateau === undefined
-        ? { state: "planned" as const }
-        : { state: "confirmed" as const, slot: matchday.plateau }),
-    });
-
-    return {
-      matchId,
-      duplicateWarning:
-        duplicate === undefined
-          ? null
-          : `${homeTeam.name} reçoit déjà ${awayTeam.name} dans ce championnat. ` +
-            "Le match a été créé quand même.",
-    };
+    return { created: outbound.length, duplicateWarnings };
   },
 });
 

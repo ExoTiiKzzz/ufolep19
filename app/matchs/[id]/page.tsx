@@ -42,6 +42,7 @@ import {
 } from "@/lib/labels";
 import { flagMessage, kindLabel, UPPER_LEVEL_MATCH_LIMIT } from "@/lib/rules/reinforcement";
 import { forfeitScore, type MatchFormat } from "@/lib/rules/score";
+import { isOutsideWindow, outsideWindowMessage } from "@/lib/rules/window";
 
 export default function MatchPage() {
   const matchId = useParams<{ id: string }>().id as Id<"matches">;
@@ -98,6 +99,8 @@ export default function MatchPage() {
   const [awayLineup, setAwayLineup] = useState<string[]>([]);
   // Plateau : la composition d'une équipe est reprise de son match précédent de la journée.
   const [lineupSeed, setLineupSeed] = useState<string | null>(null);
+  // Annonce, au fil de la saisie, qu'une date sort de la fenêtre (ADR-0006).
+  const [proposalOutside, setProposalOutside] = useState(false);
 
   async function guard(action: () => Promise<unknown>, success?: string) {
     setError(null);
@@ -204,6 +207,10 @@ export default function MatchPage() {
             {formatDateTime(match.slot.at)} · {match.slot.venue}
           </span>
         )}
+        {/* Signalement du déroulé administratif (ADR-0006) : pas pour le public. */}
+        {history?.slotOutsideWindow ? (
+          <Badge variant="secondary">{outsideWindowMessage(match.matchdayNumber)}</Badge>
+        ) : null}
         {match.result === undefined ? null : (
           <span className="text-sm font-semibold">
             {formatSets(match.result.homeSets, match.result.awaySets)}
@@ -288,8 +295,11 @@ export default function MatchPage() {
               <CardHeader>
                 <CardTitle className="text-base">Proposer un créneau</CardTitle>
                 <CardDescription>
-                  La date doit tomber dans la fenêtre de la journée. Le visiteur valide ensuite,
-                  ou son silence vaut accord au bout de 7 jours.
+                  La date est attendue dans la fenêtre de la journée (
+                  {formatWindow(match.windowStart, match.windowEnd)}). Le visiteur valide
+                  ensuite, ou son silence vaut accord au bout de 7 jours. Un match avancé ou
+                  retardé par arrangement peut se jouer hors fenêtre : il sera signalé, et le
+                  visiteur devra valider explicitement.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -304,15 +314,17 @@ export default function MatchPage() {
                       return;
                     }
                     await guard(async () => {
-                      const { tacitDeadline } = await proposeSlot({
+                      const { tacitDeadline, outsideWindow } = await proposeSlot({
                         matchId,
                         at,
                         venue: String(form.get("venue")),
                       });
                       setNotice(
-                        tacitDeadline === null
-                          ? "Proposition envoyée. Le créneau est trop proche pour un accord tacite : le visiteur doit valider explicitement."
-                          : `Proposition envoyée. Sans réponse, elle sera acceptée ${formatCountdown(tacitDeadline)}.`,
+                        outsideWindow
+                          ? "Proposition envoyée, hors de la fenêtre de la journée : elle est signalée, et le visiteur doit la valider explicitement."
+                          : tacitDeadline === null
+                            ? "Proposition envoyée. Le créneau est trop proche pour un accord tacite : le visiteur doit valider explicitement."
+                            : `Proposition envoyée. Sans réponse, elle sera acceptée ${formatCountdown(tacitDeadline)}.`,
                       );
                     });
                   }}
@@ -325,8 +337,11 @@ export default function MatchPage() {
                       type="datetime-local"
                       className="mt-2"
                       required
-                      min={inputValueFromTimestamp(Math.max(match.windowStart, now))}
-                      max={inputValueFromTimestamp(match.windowEnd)}
+                      min={inputValueFromTimestamp(now)}
+                      onChange={(event) => {
+                        const at = parisTimestampFromInput(event.target.value);
+                        setProposalOutside(at !== null && isOutsideWindow(at, match));
+                      }}
                       defaultValue={inputValueFromTimestamp(
                         Math.max(match.windowStart, now + 7 * 86_400_000),
                       )}
@@ -343,6 +358,13 @@ export default function MatchPage() {
                     />
                   </div>
                   <Button type="submit">Proposer</Button>
+                  {proposalOutside ? (
+                    <p className="w-full text-sm">
+                      <Badge variant="secondary">Hors fenêtre</Badge> Cette date sort de la
+                      fenêtre de la journée : pas de validation tacite, le visiteur devra
+                      répondre.
+                    </p>
+                  ) : null}
                 </form>
               </CardContent>
             </Card>
@@ -357,9 +379,11 @@ export default function MatchPage() {
                 <CardDescription>
                   {formatDateTime(pendingProposal.at)} · {pendingProposal.venue} — proposé par{" "}
                   {pendingProposal.proposedByName}.
-                  {pendingProposal.deadline === null
-                    ? " Le créneau est proche : votre validation explicite est requise."
-                    : ` Sans réponse, il sera accepté ${formatCountdown(pendingProposal.deadline)}.`}
+                  {pendingProposal.outsideWindow
+                    ? ` ${outsideWindowMessage(match.matchdayNumber)} Votre validation explicite est requise.`
+                    : pendingProposal.deadline === null
+                      ? " Le créneau est proche : votre validation explicite est requise."
+                      : ` Sans réponse, il sera accepté ${formatCountdown(pendingProposal.deadline)}.`}
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex gap-3">
@@ -697,6 +721,11 @@ export default function MatchPage() {
                   <span className="text-muted-foreground">Créneau</span>{" "}
                   {formatDateTime(proposal.at)} · {proposal.venue} —{" "}
                   {proposalStatusLabels[proposal.status]} (proposé par {proposal.proposedByName})
+                  {proposal.outsideWindow ? (
+                    <Badge variant="secondary" className="ml-2">
+                      Hors fenêtre
+                    </Badge>
+                  ) : null}
                 </p>
               ))}
               {history.postponements.map((request) => (

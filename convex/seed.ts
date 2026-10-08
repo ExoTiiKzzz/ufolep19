@@ -1049,7 +1049,9 @@ export const build = internalMutation({
       state: "awaitingSlot",
     });
     counts.matches++;
-    const slotDeadline = slotTacitDeadline(now, awaitingAt);
+    const awaitingDay = await ctx.db.get(matchdayIds[4]);
+    const slotDeadline =
+      awaitingDay === null ? null : slotTacitDeadline(now, awaitingAt, awaitingDay);
     const pendingProposalId = await ctx.db.insert("slotProposals", {
       matchId: matchToAnswerId,
       at: awaitingAt,
