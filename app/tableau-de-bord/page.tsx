@@ -3,8 +3,8 @@
 import { useQuery } from "convex/react";
 import Link from "next/link";
 
-import { ClubLogo } from "@/components/club-logo";
 import { MatchRow } from "@/components/match-row";
+import { MatchTeams, sidesOf } from "@/components/match-teams";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/convex/_generated/api";
@@ -99,21 +99,7 @@ export default function DashboardPage() {
                 href={`/matchs/${row.match._id}`}
                 className="hover:bg-muted/50 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md px-2 py-2 text-sm"
               >
-                <span className="flex items-center gap-2">
-                  <ClubLogo
-                    name={row.match.homeClubName}
-                    logoUrl={row.match.homeClubLogoUrl}
-                    size={20}
-                  />
-                  <span className="font-medium">{row.match.homeTeamName}</span>
-                  <span className="text-muted-foreground">—</span>
-                  <ClubLogo
-                    name={row.match.awayClubName}
-                    logoUrl={row.match.awayClubLogoUrl}
-                    size={20}
-                  />
-                  <span className="font-medium">{row.match.awayTeamName}</span>
-                </span>
+                <MatchTeams {...sidesOf(row.match)} />
                 <span className="text-muted-foreground">
                   journée {row.match.matchdayNumber}
                   {row.match.slot === undefined
@@ -147,21 +133,10 @@ export default function DashboardPage() {
                 href={`/matchs/${row.match._id}`}
                 className="text-muted-foreground hover:bg-muted/50 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md px-2 py-2 text-sm"
               >
-                <span className="flex items-center gap-2">
-                  <ClubLogo
-                    name={row.match.homeClubName}
-                    logoUrl={row.match.homeClubLogoUrl}
-                    size={20}
-                  />
-                  {row.match.homeTeamName}
-                  <span>—</span>
-                  <ClubLogo
-                    name={row.match.awayClubName}
-                    logoUrl={row.match.awayClubLogoUrl}
-                    size={20}
-                  />
-                  {row.match.awayTeamName}
-                </span>
+                <MatchTeams
+                  home={{ ...sidesOf(row.match).home, emphasis: "font-normal" }}
+                  away={{ ...sidesOf(row.match).away, emphasis: "font-normal" }}
+                />
                 <span>journée {row.match.matchdayNumber}</span>
               </Link>
             ))}
