@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery } from "convex/react";
+import { ArrowLeftRight } from "lucide-react";
 import type { FunctionReturnType } from "convex/server";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
@@ -843,6 +844,30 @@ export default function MatchPage() {
                   ))}
                   <Button type="submit" variant="outline">
                     Enregistrer
+                  </Button>
+                  {/* Inverse d'un geste une affiche saisie à l'envers. */}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={
+                      match.state === "awaitingSheet" ||
+                      match.state === "disputed" ||
+                      match.state === "completed"
+                    }
+                    onClick={() =>
+                      guard(
+                        () =>
+                          updateMatch({
+                            matchId,
+                            homeTeamId: match.awayTeamId,
+                            awayTeamId: match.homeTeamId,
+                          }),
+                        `${match.awayTeamName} reçoit désormais ${match.homeTeamName}.`,
+                      )
+                    }
+                  >
+                    <ArrowLeftRight className="size-4" />
+                    Inverser
                   </Button>
                   {match.state === "awaitingSheet" ||
                   match.state === "disputed" ||
