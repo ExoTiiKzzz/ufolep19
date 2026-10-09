@@ -59,12 +59,20 @@ export function MatchRow({
           {matchStateLabels[match.state]}
         </Badge>
       </span>
-      <span className={showMatchday ? "text-muted-foreground sm:pl-11" : "text-muted-foreground"}>
-        {showMatchday ? <span className="sm:hidden">J{match.matchdayNumber} · </span> : null}
-        {match.slot === undefined
-          ? "créneau à fixer"
-          : `${formatDateTime(match.slot.at)} · ${match.slot.venue}`}
-      </span>
+      {/*
+       * Sans créneau, rien dessous : le badge « Créneau à fixer » le dit déjà. Sur un
+       * téléphone, la ligne garde alors seulement le numéro de journée.
+       */}
+      {match.slot === undefined ? (
+        showMatchday ? (
+          <span className="text-muted-foreground sm:hidden">J{match.matchdayNumber}</span>
+        ) : null
+      ) : (
+        <span className={showMatchday ? "text-muted-foreground sm:pl-11" : "text-muted-foreground"}>
+          {showMatchday ? <span className="sm:hidden">J{match.matchdayNumber} · </span> : null}
+          {formatDateTime(match.slot.at)} · {match.slot.venue}
+        </span>
+      )}
     </Link>
   );
 }
