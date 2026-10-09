@@ -3,7 +3,7 @@
 import { useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { ClubLogo } from "@/components/club-logo";
@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
@@ -62,10 +63,26 @@ export default function MatchPage() {
   const isPlateau = format === "plateau";
   // Les licenciés alignables ne sont lus qu'au moment de transcrire la feuille, et par qui
   // en a la main : tout le club, licences jugées à la date du match.
+  //
+  // L'administrateur saisit directement, à tout stade où une feuille a un sens, et corrige
+  // une feuille en attente ou terminée.
+  const isAdmin = history?.iAmAdmin === true;
+  const correcting =
+    isAdmin && (match?.state === "awaitingSheet" || match?.state === "completed");
   const entering =
-    match?.state === "confirmed" &&
-    history !== undefined &&
-    (isPlateau ? history.iAmAdmin : history.iAmHome || history.iAmAdmin);
+    correcting ||
+    (match?.state === "confirmed" &&
+      history !== undefined &&
+      (isPlateau ? history.iAmAdmin : history.iAmHome || history.iAmAdmin));
+  // Pour corriger les équipes ou la journée d'un match.
+  const championshipTeams = useQuery(
+    api.teams.listByChampionship,
+    isAdmin && match ? { championshipId: match.championshipId } : "skip",
+  );
+  const championshipDays = useQuery(
+    api.matchdays.listByChampionship,
+    isAdmin && match ? { championshipId: match.championshipId } : "skip",
+  );
   const homeCandidates = useQuery(
     api.sheets.lineupCandidates,
     entering && match ? { matchId, teamId: match.homeTeamId } : "skip",
@@ -87,6 +104,10 @@ export default function MatchPage() {
   const settleDispute = useMutation(api.sheets.settleDispute);
   const forfeit = useMutation(api.sheets.forfeit);
   const recordResult = useMutation(api.sheets.record);
+  const fixSlot = useMutation(api.negotiation.fixSlot);
+  const updateMatch = useMutation(api.matches.update);
+  const removeMatch = useMutation(api.matches.remove);
+  const router = useRouter();
 
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -102,6 +123,9 @@ export default function MatchPage() {
   const [lineupSeed, setLineupSeed] = useState<string | null>(null);
   // Annonce, au fil de la saisie, qu'une date sort de la fenêtre (ADR-0006).
   const [proposalOutside, setProposalOutside] = useState(false);
+  // Correction d'une feuille par l'administrateur : la grille part de la feuille existante.
+  const [correctionSeed, setCorrectionSeed] = useState<string | null>(null);
+  const [confirmingRemoval, setConfirmingRemoval] = useState(false);
 
   async function guard(action: () => Promise<unknown>, success?: string) {
     setError(null);
@@ -152,7 +176,12 @@ export default function MatchPage() {
 
   // Reprise de la composition du plateau, une seule fois par match : le repère évite
   // d'écraser une composition ajustée à la main.
-  if (isPlateau && homeCandidates !== undefined && awayCandidates !== undefined) {
+  if (
+    isPlateau &&
+    match.state === "confirmed" &&
+    homeCandidates !== undefined &&
+    awayCandidates !== undefined
+  ) {
     const key = `${matchId}`;
     if (key !== lineupSeed) {
       setLineupSeed(key);
@@ -165,6 +194,20 @@ export default function MatchPage() {
   // la grille avec la feuille contestée. Motif React d'ajustement d'état pendant le rendu :
   // le repère évite de réécraser les corrections à chaque re-rendu, et le statut le fait
   // repartir si la feuille retombe en litige plus tard.
+  // Correction : même motif, la grille et les compositions partent de la feuille existante.
+  const correctedSheet = correcting && sheet ? sheet : null;
+  if (correctedSheet !== null) {
+    const key = `${match.state}:${JSON.stringify(correctedSheet.sets)}:${correctedSheet.homeLineup
+      .map((player) => player._id)
+      .join()}:${correctedSheet.awayLineup.map((player) => player._id).join()}`;
+    if (key !== correctionSeed) {
+      setCorrectionSeed(key);
+      setSheetSets(setInputsFrom(correctedSheet.sets, format));
+      setHomeLineup(correctedSheet.homeLineup.map((player) => player._id));
+      setAwayLineup(correctedSheet.awayLineup.map((player) => player._id));
+    }
+  }
+
   const disputedSheet = match.state === "disputed" && sheet ? sheet : null;
   if (disputedSheet !== null) {
     // Le repère décrit la feuille elle-même : il ne bouge pas quand l'administrateur tape,
@@ -471,14 +514,22 @@ export default function MatchPage() {
             </Card>
           ) : null}
 
-          {match.state === "confirmed" && playable && entering ? (
+          {playable && entering && (match.state === "confirmed" || correcting) ? (
             <Card className="mt-6">
               <CardHeader>
                 <CardTitle className="text-base">
-                  {isPlateau ? "Résultat du plateau" : "Feuille de match"}
+                  {correcting
+                    ? "Corriger la feuille (administrateur)"
+                    : isPlateau
+                      ? "Résultat du plateau"
+                      : "Feuille de match"}
                 </CardTitle>
                 <CardDescription>
-                  {isPlateau
+                  {correcting
+                    ? "Score et compositions partent de la feuille actuelle. L'enregistrement termine le match, sans validation du visiteur."
+                    : isAdmin && !isPlateau
+                      ? "En administrateur, la feuille est enregistrée directement : le match est terminé sans validation du visiteur."
+                      : isPlateau
                     ? "Saisissez le score des 2 sets et les compositions. Le match est terminé dès l'enregistrement : pas de validation du visiteur. La composition de chaque équipe est reprise de son match précédent du plateau."
                     : "Transcrivez la feuille unique : le score par set et les compositions des deux équipes. Le visiteur validera l'ensemble."}
                 </CardDescription>
@@ -522,9 +573,16 @@ export default function MatchPage() {
                         homeLineup: homeLineup as Id<"players">[],
                         awayLineup: awayLineup as Id<"players">[],
                       };
-                      if (isPlateau) {
+                      if (isAdmin) {
                         await recordResult(payload);
-                        setNotice("Résultat enregistré : le match entre au classement.");
+                        setNotice(
+                          correcting
+                            ? "Feuille corrigée."
+                            : "Résultat enregistré : le match entre au classement.",
+                        );
+                        if (correcting) {
+                          return;
+                        }
                       } else {
                         const { tacitDeadline } = await submitSheet(payload);
                         setNotice(
@@ -537,7 +595,11 @@ export default function MatchPage() {
                     })
                   }
                 >
-                  {isPlateau ? "Enregistrer le résultat" : "Envoyer la feuille"}
+                  {correcting
+                    ? "Enregistrer la correction"
+                    : isAdmin
+                      ? "Enregistrer le résultat"
+                      : "Envoyer la feuille"}
                 </Button>
               </CardContent>
             </Card>
@@ -700,6 +762,190 @@ export default function MatchPage() {
                 >
                   Forfait de {match.awayTeamName}
                 </Button>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {isAdmin ? (
+            <Card className="mt-6">
+              <CardHeader>
+                <CardTitle className="text-base">Administration du match</CardTitle>
+                <CardDescription>
+                  Corrections réservées à l&apos;administrateur, à tout stade du match.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-6">
+                {/*
+                 * Rendu une fois les listes chargées : un <select> pose sa valeur par défaut à
+                 * son premier rendu, et sans ses options il retomberait sur la première.
+                 */}
+                {championshipDays === undefined || championshipTeams === undefined ? (
+                  <p className="text-muted-foreground text-sm">Chargement…</p>
+                ) : (
+                <form
+                  className="flex flex-wrap items-end gap-3"
+                  onSubmit={async (event) => {
+                    event.preventDefault();
+                    const form = new FormData(event.currentTarget);
+                    await guard(
+                      () =>
+                        updateMatch({
+                          matchId,
+                          matchdayId: String(form.get("matchdayId")) as Id<"matchdays">,
+                          // Un champ désactivé n'est pas envoyé : les équipes restent alors.
+                          homeTeamId: (form.get("homeTeamId") ?? match.homeTeamId) as Id<"teams">,
+                          awayTeamId: (form.get("awayTeamId") ?? match.awayTeamId) as Id<"teams">,
+                        }),
+                      "Match modifié.",
+                    );
+                  }}
+                >
+                  <div>
+                    <Label htmlFor="edit-matchday">{matchdayNoun(championship?.format)}</Label>
+                    <Select
+                      id="edit-matchday"
+                      name="matchdayId"
+                      className="mt-2"
+                      key={match.matchdayId}
+                      defaultValue={match.matchdayId}
+                    >
+                      {championshipDays.map((day) => (
+                        <option key={day._id} value={day._id}>
+                          {matchdayNoun(championship?.format)} {day.number}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  {(["homeTeamId", "awayTeamId"] as const).map((field) => (
+                    <div key={field} className="min-w-40 flex-1">
+                      <Label htmlFor={`edit-${field}`}>
+                        {field === "homeTeamId" ? "Reçoit" : "Se déplace"}
+                      </Label>
+                      <Select
+                        id={`edit-${field}`}
+                        name={field}
+                        className="mt-2"
+                        key={match[field]}
+                        defaultValue={match[field]}
+                        disabled={
+                          match.state === "awaitingSheet" ||
+                          match.state === "disputed" ||
+                          match.state === "completed"
+                        }
+                      >
+                        {championshipTeams.map((team) => (
+                          <option key={team._id} value={team._id}>
+                            {team.name}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                  ))}
+                  <Button type="submit" variant="outline">
+                    Enregistrer
+                  </Button>
+                  {match.state === "awaitingSheet" ||
+                  match.state === "disputed" ||
+                  match.state === "completed" ? (
+                    <p className="text-muted-foreground w-full text-xs">
+                      Ce match a une feuille : ses équipes ne changent plus. Pour une autre
+                      affiche, supprimez-le et recréez-le.
+                    </p>
+                  ) : null}
+                </form>
+                )}
+
+                {isPlateau ? (
+                  <p className="text-muted-foreground border-t pt-4 text-sm">
+                    Le créneau d&apos;un match de plateau est celui du plateau : déplacez le
+                    plateau depuis l&apos;écran du championnat.
+                  </p>
+                ) : (
+                  <form
+                    className="flex flex-wrap items-end gap-3 border-t pt-4"
+                    onSubmit={async (event) => {
+                      event.preventDefault();
+                      const form = new FormData(event.currentTarget);
+                      const at = parisTimestampFromInput(String(form.get("at")));
+                      if (at === null) {
+                        setError("Date ou heure invalide.");
+                        return;
+                      }
+                      await guard(
+                        () => fixSlot({ matchId, at, venue: String(form.get("venue")) }),
+                        match.state === "awaitingSheet" ||
+                          match.state === "disputed" ||
+                          match.state === "completed"
+                          ? "Créneau corrigé."
+                          : "Créneau fixé : le match est confirmé.",
+                      );
+                    }}
+                  >
+                    <div>
+                      <Label htmlFor="fix-at">Date et heure</Label>
+                      <Input
+                        id="fix-at"
+                        name="at"
+                        type="datetime-local"
+                        className="mt-2"
+                        required
+                        key={match.slot?.at ?? "none"}
+                        defaultValue={
+                          match.slot === undefined
+                            ? undefined
+                            : inputValueFromTimestamp(match.slot.at)
+                        }
+                      />
+                    </div>
+                    <div className="min-w-56 flex-1">
+                      <Label htmlFor="fix-venue">Lieu</Label>
+                      <Input
+                        id="fix-venue"
+                        name="venue"
+                        className="mt-2"
+                        required
+                        key={match.slot?.venue ?? history.defaultVenue}
+                        defaultValue={match.slot?.venue ?? history.defaultVenue}
+                      />
+                    </div>
+                    <Button type="submit" variant="outline">
+                      Fixer le créneau
+                    </Button>
+                    <p className="text-muted-foreground w-full text-xs">
+                      Sans proposition ni validation : la négociation en cours est annulée et le
+                      match confirmé. Après la feuille, seul le créneau est corrigé.
+                    </p>
+                  </form>
+                )}
+
+                <div className="flex flex-wrap items-center gap-3 border-t pt-4">
+                  {confirmingRemoval ? (
+                    <>
+                      <p className="text-sm">
+                        Supprimer ce match avec sa feuille, ses compositions et son historique ?
+                        {match.state === "completed" ? " Il sortira du classement." : ""}
+                      </p>
+                      <Button
+                        variant="destructive"
+                        onClick={() =>
+                          guard(async () => {
+                            await removeMatch({ matchId });
+                            router.push(`/administration/championnats/${match.championshipId}`);
+                          })
+                        }
+                      >
+                        Supprimer définitivement
+                      </Button>
+                      <Button variant="ghost" onClick={() => setConfirmingRemoval(false)}>
+                        Annuler
+                      </Button>
+                    </>
+                  ) : (
+                    <Button variant="ghost" onClick={() => setConfirmingRemoval(true)}>
+                      Supprimer le match…
+                    </Button>
+                  )}
+                </div>
               </CardContent>
             </Card>
           ) : null}

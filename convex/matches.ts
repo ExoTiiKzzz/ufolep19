@@ -3,7 +3,7 @@ import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { attachedTeamIds, managedTeamIds, requireAdmin, requireUser } from "./authz";
-import { assertBracketMatch } from "./bracket";
+import { assertBracketMatch, assertBracketMatchRemovable } from "./bracket";
 import { matchResult, matchState, slot } from "./schema";
 
 export const matchSummary = v.object({
@@ -291,11 +291,21 @@ export const mirrorMatchday = mutation({
   },
 });
 
+/** États où le match porte une feuille, donc des compositions rattachées à ses équipes. */
+const WITH_SHEET = new Set(["awaitingSheet", "disputed", "completed"]);
+
 /**
- * Corrige un match tant qu'aucun créneau n'est confirmé — ou, sur un plateau, tant qu'il
- * n'est pas joué : son créneau est celui du plateau, il n'a rien de négocié.
+ * L'administrateur corrige la journée, le receveur ou le visiteur d'un match.
+ *
+ * La journée se change à tout moment. Les équipes, tant qu'aucune feuille n'existe : une
+ * feuille porte les compositions des deux équipes, qui ne survivraient pas à un changement
+ * d'adversaire — on supprime alors le match pour le recréer. Changer d'équipes pendant une
+ * négociation l'annule : la proposition venait de l'ancien receveur.
+ *
+ * Dans un tableau, les mêmes garde-fous qu'à la création s'appliquent, et un match qui a une
+ * feuille ne change plus de tour.
  */
-export const updatePlanned = mutation({
+export const update = mutation({
   args: {
     matchId: v.id("matches"),
     matchdayId: v.optional(v.id("matchdays")),
@@ -309,41 +319,112 @@ export const updatePlanned = mutation({
     if (match === null) {
       throw new ConvexError("Match inconnu.");
     }
-    const currentDay = await ctx.db.get(match.matchdayId);
-    const onPlateau = currentDay?.plateau !== undefined;
-    if (onPlateau ? match.state !== "confirmed" : match.state !== "planned") {
-      throw new ConvexError(
-        onPlateau
-          ? "Ce match de plateau est déjà joué : corrigez sa feuille plutôt."
-          : "Ce match n'est plus modifiable : une négociation est engagée. Passez par un report.",
-      );
-    }
     const homeTeamId = args.homeTeamId ?? match.homeTeamId;
     const awayTeamId = args.awayTeamId ?? match.awayTeamId;
+    const matchdayId = args.matchdayId ?? match.matchdayId;
+    const teamsChange = homeTeamId !== match.homeTeamId || awayTeamId !== match.awayTeamId;
+    const dayChange = matchdayId !== match.matchdayId;
+    if (!teamsChange && !dayChange) {
+      return null;
+    }
     if (homeTeamId === awayTeamId) {
       throw new ConvexError("Une équipe ne peut pas se rencontrer elle-même.");
     }
-    const matchdayId = args.matchdayId ?? match.matchdayId;
-    const matchday = await ctx.db.get(matchdayId);
-    if (matchday === null) {
-      throw new ConvexError("Journée inconnue.");
+    if (teamsChange && WITH_SHEET.has(match.state)) {
+      throw new ConvexError(
+        "Ce match a une feuille, qui porte les compositions de ses deux équipes : pour en " +
+          "changer, supprimez le match et recréez-le.",
+      );
     }
-    for (const teamId of [homeTeamId, awayTeamId] as Id<"teams">[]) {
+    const matchday = await ctx.db.get(matchdayId);
+    if (matchday === null || matchday.championshipId !== match.championshipId) {
+      throw new ConvexError("Journée inconnue dans ce championnat.");
+    }
+    for (const teamId of [homeTeamId, awayTeamId]) {
       const team = await ctx.db.get(teamId);
-      if (team === null || team.championshipId !== matchday.championshipId) {
+      if (team === null || team.championshipId !== match.championshipId) {
         throw new ConvexError("Équipe inconnue ou non engagée dans ce championnat.");
       }
     }
-    if ((await ctx.db.get(matchday.championshipId))?.format === "tableau") {
+    if ((await ctx.db.get(match.championshipId))?.format === "tableau") {
+      if (WITH_SHEET.has(match.state)) {
+        throw new ConvexError(
+          "Dans un tableau, un match qui a une feuille ne change plus de tour : le tour " +
+            "suivant en dépend.",
+        );
+      }
       await assertBracketMatch(ctx, matchday, homeTeamId, awayTeamId, args.matchId);
+    }
+
+    let negotiation = {};
+    if (teamsChange && match.state === "awaitingSlot") {
+      const pending = (
+        await ctx.db
+          .query("slotProposals")
+          .withIndex("by_match", (q) => q.eq("matchId", match._id))
+          .collect()
+      ).filter((proposal) => proposal.status === "pending");
+      for (const proposal of pending) {
+        await ctx.db.patch(proposal._id, { status: "cancelled" });
+      }
+      if (match.tacitJobId !== undefined) {
+        await ctx.scheduler.cancel(match.tacitJobId);
+      }
+      negotiation = { state: "planned" as const, tacitJobId: undefined };
     }
     await ctx.db.patch(args.matchId, {
       matchdayId,
       homeTeamId,
       awayTeamId,
-      championshipId: matchday.championshipId,
-      ...(matchday.plateau === undefined ? {} : { slot: matchday.plateau }),
+      ...negotiation,
+      // Un match de plateau non joué suit la date et la salle de son plateau.
+      ...(matchday.plateau !== undefined && match.state === "confirmed"
+        ? { slot: matchday.plateau }
+        : {}),
     });
+    // Les compositions sont rangées par journée, pour détecter les cumuls.
+    if (dayChange) {
+      const entries = await ctx.db
+        .query("lineupEntries")
+        .withIndex("by_match", (q) => q.eq("matchId", match._id))
+        .collect();
+      for (const entry of entries) {
+        await ctx.db.patch(entry._id, { matchdayId });
+      }
+    }
+    return null;
+  },
+});
+
+/**
+ * Supprime un match, avec tout ce qui s'y rattache : propositions, reports, feuille,
+ * compositions, et l'échéance tacite qui court. Un match terminé sort du classement.
+ *
+ * Dans un tableau, refusé si le tour suivant d'une des deux équipes repose déjà sur ce match.
+ */
+export const remove = mutation({
+  args: { matchId: v.id("matches") },
+  returns: v.null(),
+  handler: async (ctx, { matchId }) => {
+    await requireAdmin(ctx);
+    const match = await ctx.db.get(matchId);
+    if (match === null) {
+      throw new ConvexError("Match inconnu.");
+    }
+    await assertBracketMatchRemovable(ctx, match);
+    if (match.tacitJobId !== undefined) {
+      await ctx.scheduler.cancel(match.tacitJobId);
+    }
+    for (const table of ["slotProposals", "postponementRequests", "matchSheets", "lineupEntries"] as const) {
+      const rows = await ctx.db
+        .query(table)
+        .withIndex("by_match", (q) => q.eq("matchId", matchId))
+        .collect();
+      for (const row of rows) {
+        await ctx.db.delete(row._id);
+      }
+    }
+    await ctx.db.delete(matchId);
     return null;
   },
 });

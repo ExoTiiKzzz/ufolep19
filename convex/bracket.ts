@@ -281,6 +281,24 @@ export async function assertBracketResultEditable(
   }
 }
 
+/** Un match de tableau ne se supprime plus une fois le tour suivant engagé sur lui. */
+export async function assertBracketMatchRemovable(ctx: Ctx, match: Doc<"matches">) {
+  const championship = await ctx.db.get(match.championshipId);
+  if (championship?.format !== "tableau") {
+    return;
+  }
+  const state = await loadState(ctx, match.championshipId);
+  const round = state.roundOf.get(match.matchdayId) ?? 0;
+  for (const teamId of [match.homeTeamId, match.awayTeamId]) {
+    if (engagementAt(state, teamId, round + 1) !== null) {
+      throw new ConvexError(
+        `${teamName(state, teamId)} est déjà engagée au tour ${round + 1} sur ce match : ` +
+          "retirez d'abord ses engagements du tour suivant.",
+      );
+    }
+  }
+}
+
 async function mustGetTableauMatchday(ctx: Ctx, matchdayId: Id<"matchdays">) {
   const matchday = await ctx.db.get(matchdayId);
   if (matchday === null) {

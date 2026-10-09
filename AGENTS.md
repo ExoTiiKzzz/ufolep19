@@ -112,7 +112,8 @@ y joue autant de matchs que l'administrateur en programme.
 - Les matchs naissent **Confirmés**, au créneau du plateau : ni proposition, ni validation
   tacite, ni report entre responsables (`negotiation` les refuse). Déplacer le plateau
   (`matchdays.updatePlateau`) déplace ses matchs non joués.
-- C'est **l'administrateur** qui saisit score et compositions (`sheets.record`) : le match passe
+- C'est **l'administrateur** qui saisit score et compositions (`sheets.record`, ouverte à tous
+  les formats pour ses corrections) : le match passe
   directement à **Terminé**, sans validation du visiteur. Le receveur n'a que le rôle de colonne
   sur la feuille. Les plateaux n'apparaissent pas dans « à traiter ».
 - La composition d'une équipe est reprise par défaut de son match précédent du même plateau,
@@ -183,6 +184,21 @@ l'administrateur prononce un forfait.
 - Le receveur propose le créneau et saisit la feuille ; le visiteur valide, refuse ou conteste.
 - Un responsable ne peut pas valider sa propre proposition ni sa propre feuille.
 - Seul un administrateur prononce un forfait ou tranche un litige.
+- **L'administrateur peut tout corriger sur un match**, à tout stade :
+  - la **journée**, toujours ; le **receveur** et le **visiteur**, tant qu'aucune feuille n'existe —
+    une feuille porte les compositions des deux équipes, qui ne survivraient pas à un changement
+    d'adversaire : on supprime alors le match pour le recréer. Changer d'équipes pendant une
+    négociation l'annule (`matches.update`) ;
+  - le **créneau**, fixé sans proposition ni validation : avant la feuille, le match devient
+    Confirmé et la négociation en cours est annulée ; après, seul le créneau est corrigé
+    (`negotiation.fixSlot`). Un plateau se déplace en entier ;
+  - la **feuille** — score et compositions —, saisie ou corrigée directement : le match est
+    Terminé sans validation du visiteur, et un forfait corrigé cesse d'en être un
+    (`sheets.record`, la mutation des plateaux, ouverte à tous les formats) ;
+  - la **suppression** du match, avec sa feuille, ses compositions et son historique
+    (`matches.remove`).
+
+  Dans un tableau, rien de cela ne passe si le tour suivant repose déjà sur le match.
 
 ## Règles de score (volley)
 

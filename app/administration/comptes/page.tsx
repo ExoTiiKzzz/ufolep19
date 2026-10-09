@@ -24,6 +24,7 @@ import type { Id } from "@/convex/_generated/dataModel";
 import { accountNotice } from "@/lib/account-notice";
 import { errorMessage } from "@/lib/errors";
 import { roleLabels, type Role } from "@/lib/roles";
+import { matchesTerm } from "@/lib/rules/player-search";
 
 export default function AccountsPage() {
   const accounts = useQuery(api.users.list);
@@ -47,6 +48,14 @@ export default function AccountsPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [attachTo, setAttachTo] = useState<Record<string, string>>({});
+  const [search, setSearch] = useState("");
+  // Par préfixes de mots, sans casse ni accents : « tul » trouve les responsables de Tulle 1.
+  const shown = (accounts ?? []).filter((row) =>
+    matchesTerm(
+      [row.name ?? "", row.email ?? "", ...row.managedTeams.map((team) => team.name)],
+      search,
+    ),
+  );
 
   async function guard(action: () => Promise<unknown>, success?: string) {
     setError(null);
@@ -124,7 +133,14 @@ export default function AccountsPage() {
         <CardHeader>
           <CardTitle className="text-base">Comptes existants</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex flex-col gap-3">
+          <Input
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Nom, e-mail ou équipe rattachée"
+            aria-label="Chercher un compte"
+          />
           <Table>
             <TableHeader>
               <TableRow>
@@ -136,7 +152,7 @@ export default function AccountsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {(accounts ?? []).map((row) => (
+              {shown.map((row) => (
                 <Fragment key={row._id}>
                   <TableRow>
                     <TableCell className="font-medium">{row.name ?? "—"}</TableCell>
@@ -278,6 +294,13 @@ export default function AccountsPage() {
               ))}
             </TableBody>
           </Table>
+          {accounts !== undefined && shown.length === 0 ? (
+            <p className="text-muted-foreground text-sm">
+              {search.trim() === ""
+                ? "Aucun compte."
+                : "Aucun compte ne correspond à cette recherche."}
+            </p>
+          ) : null}
         </CardContent>
       </Card>
     </main>

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { fold, matchesPlayer, tokenize } from "./player-search";
+import { fold, matchesPlayer, matchesTerm, tokenize } from "./player-search";
 
 const camille = {
   firstName: "Camille",
@@ -84,4 +84,13 @@ test("un numéro de licence périmé retrouve encore la fiche", () => {
 
 test("une fiche sans aucune licence reste cherchable par son nom", () => {
   expect(matchesPlayer({ ...camille, licenseNumbers: [] }, "penicaut")).toBe(true);
+});
+
+test("une liste quelconque se filtre par préfixes de mots, sans casse ni accents", () => {
+  const account = ["Camille Pénicaut", "camille@club-a.fr", "Tulle 1", "Tulle Loisirs"];
+  expect(matchesTerm(account, "penic")).toBe(true);
+  expect(matchesTerm(account, "loisirs tul")).toBe(true);
+  expect(matchesTerm(account, "club-a")).toBe(true);
+  expect(matchesTerm(account, "brive")).toBe(false);
+  expect(matchesTerm(account, "  ")).toBe(true);
 });

@@ -24,6 +24,7 @@ export type MatchTransition =
   | "disputeSheet"
   | "settleDispute"
   | "recordResult"
+  | "fixSlot"
   | "forfeit";
 
 /** Qui agit, du point de vue du match. */
@@ -42,8 +43,19 @@ const RULES: Record<MatchTransition, Rule> = {
   tacitSheet: { from: ["awaitingSheet"], actors: ["system"], to: "completed" },
   disputeSheet: { from: ["awaitingSheet"], actors: ["away", "admin"], to: "disputed" },
   settleDispute: { from: ["disputed"], actors: ["admin"], to: "completed" },
-  // Plateau : l'administrateur saisit lui-même le résultat, sans validation du visiteur.
-  recordResult: { from: ["confirmed"], actors: ["admin"], to: "completed" },
+  // L'administrateur saisit ou corrige lui-même la feuille, sans validation du visiteur :
+  // c'est la règle sur un plateau, et son droit partout ailleurs.
+  recordResult: {
+    from: ["confirmed", "awaitingSheet", "disputed", "completed"],
+    actors: ["admin"],
+    to: "completed",
+  },
+  // L'administrateur fixe le créneau sans négociation.
+  fixSlot: {
+    from: ["planned", "awaitingSlot", "confirmed"],
+    actors: ["admin"],
+    to: "confirmed",
+  },
   forfeit: {
     from: ["planned", "awaitingSlot", "confirmed", "awaitingSheet", "disputed"],
     actors: ["admin"],
@@ -97,6 +109,7 @@ export const transitionLabels: Record<MatchTransition, string> = {
   tacitSheet: "valider tacitement la feuille de match",
   disputeSheet: "contester la feuille de match",
   settleDispute: "arbitrer le litige",
-  recordResult: "saisir le résultat du plateau",
+  recordResult: "saisir ou corriger la feuille en administrateur",
+  fixSlot: "fixer le créneau",
   forfeit: "prononcer un forfait",
 };

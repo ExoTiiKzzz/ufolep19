@@ -44,24 +44,34 @@ export function tokenize(value: string): string[] {
 }
 
 /**
+ * Vrai si les textes correspondent au terme cherché : chaque mot du terme doit commencer un mot
+ * des textes, dans n'importe quel ordre. Même règle que pour les licenciés, pour toute liste
+ * qu'on filtre à la frappe — les comptes, par exemple.
+ */
+export function matchesTerm(texts: readonly string[], term: string): boolean {
+  const needles = tokenize(term);
+  if (needles.length === 0) {
+    return true;
+  }
+  const haystack = tokenize(texts.join(" "));
+  return needles.every((needle) => haystack.some((word) => word.startsWith(needle)));
+}
+
+/**
  * Vrai si le licencié correspond au terme cherché.
  *
  * Chaque mot du terme doit commencer un mot de la fiche, dans n'importe quel ordre : « dur cam »
  * trouve Camille Durand.
  */
 export function matchesPlayer(player: SearchablePlayer, term: string): boolean {
-  const needles = tokenize(term);
-  if (needles.length === 0) {
-    return true;
-  }
-  const haystack = tokenize(
+  return matchesTerm(
     [
       player.firstName,
       player.lastName,
       ...player.licenseNumbers,
       player.email ?? "",
       player.clubName ?? "",
-    ].join(" "),
+    ],
+    term,
   );
-  return needles.every((needle) => haystack.some((word) => word.startsWith(needle)));
 }

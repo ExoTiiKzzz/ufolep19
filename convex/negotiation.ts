@@ -356,6 +356,60 @@ export const imposePostponement = mutation({
 });
 
 /**
+ * L'administrateur fixe directement le créneau — date, heure et lieu —, sans proposition ni
+ * validation du visiteur.
+ *
+ * Avant toute feuille, le match devient **Confirmé** : la négociation en cours est annulée,
+ * l'échéance tacite aussi, et le créneau fixé entre dans l'historique comme une proposition
+ * acceptée par le comité. Après une feuille, seul le créneau est corrigé (une date ou une
+ * salle mal transcrite) : l'état du match ne bouge pas.
+ *
+ * Un plateau se déplace en entier, depuis sa journée.
+ */
+export const fixSlot = mutation({
+  args: { matchId: v.id("matches"), at: v.number(), venue: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const admin = await requireAdmin(ctx);
+    const match = await mustGetMatch(ctx, args.matchId);
+    await assertNegotiable(ctx, match);
+    const venue = args.venue.trim();
+    if (venue === "") {
+      throw new ConvexError("Le lieu du match est obligatoire.");
+    }
+    const slot = { at: args.at, venue };
+    if (match.state === "awaitingSheet" || match.state === "disputed" || match.state === "completed") {
+      await ctx.db.patch(args.matchId, { slot });
+      return null;
+    }
+    const to = transitionTo("fixSlot", match.state, "admin");
+
+    const proposals = await ctx.db
+      .query("slotProposals")
+      .withIndex("by_match", (q) => q.eq("matchId", args.matchId))
+      .collect();
+    for (const proposal of proposals.filter((row) => row.status === "pending")) {
+      await ctx.db.patch(proposal._id, { status: "cancelled" });
+    }
+    const request = await pendingPostponement(ctx, args.matchId);
+    if (request !== null) {
+      await ctx.db.patch(request._id, { status: "rejected" });
+    }
+    await cancelTacit(ctx, match);
+    await ctx.db.insert("slotProposals", {
+      matchId: args.matchId,
+      at: slot.at,
+      venue,
+      proposedBy: admin._id,
+      status: "accepted",
+      respondedAt: Date.now(),
+    });
+    await ctx.db.patch(args.matchId, { state: to, slot, tacitJobId: undefined });
+    return null;
+  },
+});
+
+/**
  * Passé l'heure du créneau, plus de report : soit une feuille de match est saisie, soit
  * l'administrateur prononce un forfait.
  */

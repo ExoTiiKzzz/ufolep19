@@ -479,10 +479,15 @@ export const correct = mutation({
 });
 
 /**
- * Plateau : l'administrateur saisit lui-même le score et les compositions, et le match est
+ * L'administrateur saisit lui-même le score et les compositions, et le match est
  * **terminé** d'emblée — ni validation du visiteur, ni échéance tacite.
  *
- * Les règles de composition sont les mêmes qu'ailleurs : licence à la date du plateau,
+ * C'est la règle sur un plateau. Ailleurs, c'est son droit : il saisit à la place du
+ * receveur, remplace une feuille en attente de validation, ou **corrige** une feuille déjà
+ * terminée — score et compositions. Un forfait corrigé en résultat joué cesse d'être un
+ * forfait.
+ *
+ * Les règles de composition sont les mêmes qu'ailleurs : licence à la date du match,
  * joueurs du club, renforts signalés.
  */
 export const record = mutation({
@@ -497,24 +502,24 @@ export const record = mutation({
     const admin = await requireAdmin(ctx);
     const match = await mustGetMatch(ctx, args.matchId);
     const format = await formatOf(ctx, match);
-    if (format !== "plateau") {
-      throw new ConvexError(
-        "Seuls les matchs de plateau se saisissent ainsi : ailleurs, le receveur transcrit " +
-          "la feuille et le visiteur la valide.",
-      );
-    }
     const to = transitionTo("recordResult", match.state, "admin");
     if (match.slot === undefined) {
-      throw new ConvexError("Ce plateau n'a ni date ni salle.");
+      throw new ConvexError("Ce match n'a pas de créneau : fixez-le d'abord.");
     }
     if (Date.now() < match.slot.at) {
       throw new ConvexError(
-        "Le plateau n'a pas encore eu lieu : la saisie ouvre à l'heure du plateau.",
+        "Le match n'a pas encore eu lieu : la saisie ouvre à l'heure du créneau.",
       );
     }
 
     const result = resultFrom(match, args.sets, format);
     await checkLineups(ctx, match, match.slot.at, args.homeLineup, args.awayLineup);
+    if (match.state === "completed") {
+      await assertBracketResultEditable(ctx, match, result.winnerTeamId);
+    }
+    if (match.tacitJobId !== undefined) {
+      await ctx.scheduler.cancel(match.tacitJobId);
+    }
 
     const existing = await sheetOf(ctx, args.matchId);
     const sheet = {
@@ -531,7 +536,12 @@ export const record = mutation({
       await ctx.db.patch(existing._id, sheet);
     }
     await writeLineups(ctx, match, args.homeLineup, args.awayLineup);
-    await ctx.db.patch(args.matchId, { state: to, result, tacitJobId: undefined });
+    await ctx.db.patch(args.matchId, {
+      state: to,
+      result,
+      tacitJobId: undefined,
+      forfeitAgainst: undefined,
+    });
     return null;
   },
 });
