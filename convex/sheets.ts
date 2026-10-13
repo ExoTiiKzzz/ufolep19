@@ -28,7 +28,7 @@ import {
   newChampionshipCache,
   reinforcementInfo,
 } from "./reinforcements";
-import { reinforcementQuota } from "./schema";
+import { reinforcementQuota, slot as slotShape } from "./schema";
 
 type Ctx = QueryCtx | MutationCtx;
 
@@ -205,6 +205,60 @@ function formatLicenseDate(at: number): string {
 }
 
 /**
+ * Le créneau où le match s'est joué, celui qui fait foi pour les licences.
+ *
+ * Un match **confirmé** a son créneau. Un match joué sans que son créneau ait été fixé — arrangé
+ * par téléphone, proposition jamais validée — se saisit quand même : la feuille donne alors
+ * la date et le lieu, et le visiteur les valide avec elle. Dans tous les cas, le match doit
+ * avoir eu lieu.
+ */
+function playedSlot(
+  match: Doc<"matches">,
+  given: { at: number; venue: string } | undefined,
+): { at: number; venue: string } {
+  const unscheduled = match.state === "planned" || match.state === "awaitingSlot";
+  let slot = match.slot;
+  if (unscheduled) {
+    if (given === undefined) {
+      throw new ConvexError(
+        "Ce match n'a pas de créneau fixé : indiquez la date et le lieu où il s'est joué.",
+      );
+    }
+    const venue = given.venue.trim();
+    if (venue === "") {
+      throw new ConvexError("Le lieu du match est obligatoire.");
+    }
+    slot = { at: given.at, venue };
+  }
+  if (slot === undefined) {
+    throw new ConvexError("Ce match n'a pas de créneau : fixez-le d'abord.");
+  }
+  if (Date.now() < slot.at) {
+    throw new ConvexError(
+      "Le match n'a pas encore eu lieu : la saisie ouvre à l'heure du créneau.",
+    );
+  }
+  return slot;
+}
+
+/** Une négociation encore ouverte n'a plus d'objet une fois le match joué : on la clôt. */
+async function closeNegotiation(ctx: MutationCtx, match: Doc<"matches">) {
+  if (match.state !== "planned" && match.state !== "awaitingSlot") {
+    return;
+  }
+  const proposals = await ctx.db
+    .query("slotProposals")
+    .withIndex("by_match", (q) => q.eq("matchId", match._id))
+    .collect();
+  for (const proposal of proposals.filter((row) => row.status === "pending")) {
+    await ctx.db.patch(proposal._id, { status: "cancelled" });
+  }
+  if (match.tacitJobId !== undefined) {
+    await ctx.scheduler.cancel(match.tacitJobId);
+  }
+}
+
+/**
  * Le receveur transcrit la feuille de match : score par set et compositions des **deux**
  * équipes (ADR-0003). Le visiteur valide ensuite l'ensemble en un seul geste.
  */
@@ -214,6 +268,8 @@ export const submit = mutation({
     sets: v.array(setScore),
     homeLineup: v.array(v.id("players")),
     awayLineup: v.array(v.id("players")),
+    /** Date et lieu du match, quand son créneau n'a jamais été fixé. */
+    slot: v.optional(slotShape),
   },
   returns: v.object({ tacitDeadline: v.number() }),
   handler: async (ctx, args) => {
@@ -227,18 +283,12 @@ export const submit = mutation({
         "Sur un plateau, c'est l'administrateur qui saisit les résultats.",
       );
     }
-    if (match.slot === undefined) {
-      throw new ConvexError("Ce match n'a pas de créneau confirmé.");
-    }
-    if (Date.now() < match.slot.at) {
-      throw new ConvexError(
-        "Le match n'a pas encore eu lieu : la saisie ouvre à l'heure du créneau.",
-      );
-    }
+    const slot = playedSlot(match, args.slot);
 
     // Le score est validé avant les compositions : c'est l'erreur la plus fréquente.
     const result = resultFrom(match, args.sets, format);
-    await checkLineups(ctx, match, match.slot.at, args.homeLineup, args.awayLineup);
+    await checkLineups(ctx, match, slot.at, args.homeLineup, args.awayLineup);
+    await closeNegotiation(ctx, match);
 
     const deadline = sheetTacitDeadline(Date.now());
     const existing = await sheetOf(ctx, args.matchId);
@@ -272,7 +322,7 @@ export const submit = mutation({
       internal.sheets.applyTacitSheet,
       { matchId: args.matchId, sheetId },
     );
-    await ctx.db.patch(args.matchId, { state: to, tacitJobId });
+    await ctx.db.patch(args.matchId, { state: to, slot, tacitJobId });
     // `result` est calculé ici pour rejeter tout de suite un score impossible, mais n'est
     // écrit qu'à la validation : un match n'entre au classement qu'une fois la feuille
     // acceptée.
@@ -496,6 +546,8 @@ export const record = mutation({
     sets: v.array(setScore),
     homeLineup: v.array(v.id("players")),
     awayLineup: v.array(v.id("players")),
+    /** Date et lieu du match, quand son créneau n'a jamais été fixé. */
+    slot: v.optional(slotShape),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -503,17 +555,11 @@ export const record = mutation({
     const match = await mustGetMatch(ctx, args.matchId);
     const format = await formatOf(ctx, match);
     const to = transitionTo("recordResult", match.state, "admin");
-    if (match.slot === undefined) {
-      throw new ConvexError("Ce match n'a pas de créneau : fixez-le d'abord.");
-    }
-    if (Date.now() < match.slot.at) {
-      throw new ConvexError(
-        "Le match n'a pas encore eu lieu : la saisie ouvre à l'heure du créneau.",
-      );
-    }
+    const slot = playedSlot(match, args.slot);
 
     const result = resultFrom(match, args.sets, format);
-    await checkLineups(ctx, match, match.slot.at, args.homeLineup, args.awayLineup);
+    await checkLineups(ctx, match, slot.at, args.homeLineup, args.awayLineup);
+    await closeNegotiation(ctx, match);
     if (match.state === "completed") {
       await assertBracketResultEditable(ctx, match, result.winnerTeamId);
     }
@@ -538,6 +584,7 @@ export const record = mutation({
     await writeLineups(ctx, match, args.homeLineup, args.awayLineup);
     await ctx.db.patch(args.matchId, {
       state: to,
+      slot,
       result,
       tacitJobId: undefined,
       forfeitAgainst: undefined,
@@ -639,7 +686,12 @@ export const get = query({
  * journée, pour reprendre par défaut celle du plateau.
  */
 export const lineupCandidates = query({
-  args: { matchId: v.id("matches"), teamId: v.id("teams") },
+  args: {
+    matchId: v.id("matches"),
+    teamId: v.id("teams"),
+    /** Date du match quand son créneau n'est pas fixé : les licences se jugent à elle. */
+    at: v.optional(v.number()),
+  },
   returns: v.object({
     context: v.object({
       teamId: v.id("teams"),
@@ -660,7 +712,7 @@ export const lineupCandidates = query({
     ),
     previousOnMatchday: v.array(v.id("players")),
   }),
-  handler: async (ctx, { matchId, teamId }) => {
+  handler: async (ctx, { matchId, teamId, at: givenAt }) => {
     const match = await mustGetMatch(ctx, matchId);
     await sidesOf(ctx, match);
     if (teamId !== match.homeTeamId && teamId !== match.awayTeamId) {
@@ -676,7 +728,7 @@ export const lineupCandidates = query({
       .query("players")
       .withIndex("by_club", (q) => q.eq("clubId", team.clubId))
       .collect();
-    const at = match.slot?.at ?? Date.now();
+    const at = match.slot?.at ?? givenAt ?? Date.now();
     const licenses = newLicenseCache();
     const cache = newChampionshipCache();
     const rows = await Promise.all(

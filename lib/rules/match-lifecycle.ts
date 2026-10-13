@@ -38,7 +38,13 @@ const RULES: Record<MatchTransition, Rule> = {
   rejectSlot: { from: ["awaitingSlot"], actors: ["away", "admin"], to: "planned" },
   tacitSlot: { from: ["awaitingSlot"], actors: ["system"], to: "confirmed" },
   postpone: { from: ["confirmed"], actors: ["home", "away", "admin"], to: "planned" },
-  submitSheet: { from: ["confirmed"], actors: ["home", "admin"], to: "awaitingSheet" },
+  // Un match joué sans que son créneau ait été fixé (arrangé par téléphone) se saisit aussi :
+  // la feuille porte alors la date et le lieu où il s'est joué.
+  submitSheet: {
+    from: ["planned", "awaitingSlot", "confirmed"],
+    actors: ["home", "admin"],
+    to: "awaitingSheet",
+  },
   validateSheet: { from: ["awaitingSheet"], actors: ["away", "admin"], to: "completed" },
   tacitSheet: { from: ["awaitingSheet"], actors: ["system"], to: "completed" },
   disputeSheet: { from: ["awaitingSheet"], actors: ["away", "admin"], to: "disputed" },
@@ -46,7 +52,7 @@ const RULES: Record<MatchTransition, Rule> = {
   // L'administrateur saisit ou corrige lui-même la feuille, sans validation du visiteur :
   // c'est la règle sur un plateau, et son droit partout ailleurs.
   recordResult: {
-    from: ["confirmed", "awaitingSheet", "disputed", "completed"],
+    from: ["planned", "awaitingSlot", "confirmed", "awaitingSheet", "disputed", "completed"],
     actors: ["admin"],
     to: "completed",
   },

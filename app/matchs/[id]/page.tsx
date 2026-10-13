@@ -70,8 +70,20 @@ export default function MatchPage() {
   const isAdmin = history?.iAmAdmin === true;
   const correcting =
     isAdmin && (match?.state === "awaitingSheet" || match?.state === "completed");
+  // Match joué sans que son créneau ait été fixé : le receveur (ou l'administrateur) saisit
+  // quand même la feuille, en donnant la date et le lieu. Saisie repliée par défaut.
+  const unscheduled =
+    (match?.state === "planned" || match?.state === "awaitingSlot") &&
+    !isPlateau &&
+    history !== undefined &&
+    (history.iAmHome || history.iAmAdmin);
+  const [playedEarly, setPlayedEarly] = useState(false);
+  const [playedAtInput, setPlayedAtInput] = useState("");
+  const [playedVenue, setPlayedVenue] = useState<string | null>(null);
+  const playedAt = parisTimestampFromInput(playedAtInput);
   const entering =
     correcting ||
+    (unscheduled && playedEarly) ||
     (match?.state === "confirmed" &&
       history !== undefined &&
       (isPlateau ? history.iAmAdmin : history.iAmHome || history.iAmAdmin));
@@ -86,11 +98,15 @@ export default function MatchPage() {
   );
   const homeCandidates = useQuery(
     api.sheets.lineupCandidates,
-    entering && match ? { matchId, teamId: match.homeTeamId } : "skip",
+    entering && match
+      ? { matchId, teamId: match.homeTeamId, ...(playedAt === null ? {} : { at: playedAt }) }
+      : "skip",
   );
   const awayCandidates = useQuery(
     api.sheets.lineupCandidates,
-    entering && match ? { matchId, teamId: match.awayTeamId } : "skip",
+    entering && match
+      ? { matchId, teamId: match.awayTeamId, ...(playedAt === null ? {} : { at: playedAt }) }
+      : "skip",
   );
 
   const proposeSlot = useMutation(api.negotiation.proposeSlot);
@@ -515,18 +531,33 @@ export default function MatchPage() {
             </Card>
           ) : null}
 
-          {playable && entering && (match.state === "confirmed" || correcting) ? (
+          {unscheduled && !playedEarly ? (
+            <div className="mt-3">
+              <Button variant="outline" onClick={() => setPlayedEarly(true)}>
+                Le match a déjà été joué ? Saisir le résultat
+              </Button>
+            </div>
+          ) : null}
+
+          {(playable && entering && (match.state === "confirmed" || correcting)) ||
+          (unscheduled && playedEarly) ? (
             <Card className="mt-6">
               <CardHeader>
                 <CardTitle className="text-base">
-                  {correcting
+                  {unscheduled
+                    ? "Résultat d'un match joué sans créneau fixé"
+                    : correcting
                     ? "Corriger la feuille (administrateur)"
                     : isPlateau
                       ? "Résultat du plateau"
                       : "Feuille de match"}
                 </CardTitle>
                 <CardDescription>
-                  {correcting
+                  {unscheduled
+                    ? isAdmin
+                      ? "Indiquez quand et où le match s'est joué, puis le score et les compositions. En administrateur, le match est terminé dès l'enregistrement."
+                      : "Indiquez quand et où le match s'est joué, puis le score et les compositions. Le visiteur validera l'ensemble, date comprise ; la négociation en cours est annulée."
+                    : correcting
                     ? "Score et compositions partent de la feuille actuelle. L'enregistrement termine le match, sans validation du visiteur."
                     : isAdmin && !isPlateau
                       ? "En administrateur, la feuille est enregistrée directement : le match est terminé sans validation du visiteur."
@@ -536,6 +567,35 @@ export default function MatchPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-6">
+                {unscheduled ? (
+                  <div className="flex flex-wrap items-end gap-3">
+                    <div>
+                      <Label htmlFor="played-at">Joué le</Label>
+                      <Input
+                        id="played-at"
+                        type="datetime-local"
+                        className="mt-2"
+                        required
+                        max={inputValueFromTimestamp(now)}
+                        value={playedAtInput}
+                        onChange={(event) => setPlayedAtInput(event.target.value)}
+                      />
+                    </div>
+                    <div className="min-w-56 flex-1">
+                      <Label htmlFor="played-venue">Lieu</Label>
+                      <Input
+                        id="played-venue"
+                        className="mt-2"
+                        required
+                        value={playedVenue ?? history.defaultVenue}
+                        onChange={(event) => setPlayedVenue(event.target.value)}
+                      />
+                    </div>
+                    <Button variant="ghost" onClick={() => setPlayedEarly(false)}>
+                      Annuler
+                    </Button>
+                  </div>
+                ) : null}
                 <div>
                   <p className="text-sm font-medium">Score par set</p>
                   <div className="mt-2">
@@ -568,11 +628,17 @@ export default function MatchPage() {
                   className="self-start"
                   onClick={() =>
                     guard(async () => {
+                      if (unscheduled && playedAt === null) {
+                        throw new Error("Indiquez la date et l'heure où le match s'est joué.");
+                      }
                       const payload = {
                         matchId,
                         sets: collectSets(sheetSets),
                         homeLineup: homeLineup as Id<"players">[],
                         awayLineup: awayLineup as Id<"players">[],
+                        ...(unscheduled && playedAt !== null
+                          ? { slot: { at: playedAt, venue: playedVenue ?? history.defaultVenue } }
+                          : {}),
                       };
                       if (isAdmin) {
                         await recordResult(payload);

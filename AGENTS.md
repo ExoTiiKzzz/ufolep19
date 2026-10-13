@@ -144,6 +144,10 @@ Forfait (admin) ─────────────────────�
    - Un **report** (voir plus bas) ramène un match confirmé à l'étape 1.
 4. **À valider** — à partir de la date/heure du créneau, le receveur saisit le score par set **et
    les compositions des deux équipes**.
+   - Un match **joué sans que son créneau ait été fixé** (arrangé par téléphone, proposition jamais
+     validée) se saisit aussi depuis **Planifié** ou **En attente** : le receveur donne alors la
+     **date et le lieu** où il s'est joué — c'est cette date qui juge les licences —, la
+     négociation ouverte est annulée, et le visiteur valide la feuille date comprise.
 5. **Terminé** — le visiteur a validé la feuille, ou la validation tacite s'est appliquée. Le match
    entre au classement.
    - Une **contestation** place le match en **Litige** : seul un administrateur peut le clore, en
