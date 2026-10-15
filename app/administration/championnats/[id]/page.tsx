@@ -32,6 +32,7 @@ import {
   matchStateVariant,
 } from "@/lib/labels";
 import { roundCount } from "@/lib/rules/bracket";
+import { matchesTerm } from "@/lib/rules/player-search";
 import { errorMessage } from "@/lib/errors";
 
 export default function AdminChampionshipPage() {
@@ -66,6 +67,23 @@ export default function AdminChampionshipPage() {
 
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [teamSearch, setTeamSearch] = useState("");
+  const [matchSearch, setMatchSearch] = useState("");
+  const shownTeams = (teams ?? []).filter((team) =>
+    matchesTerm([team.name, team.clubName], teamSearch),
+  );
+  // « allas j3 » : les matchs d'Allassac en journée 3 ; « litige » : les matchs en litige.
+  const shownMatches = (matches ?? []).filter((match) =>
+    matchesTerm(
+      [
+        `J${match.matchdayNumber}`,
+        match.homeTeamName,
+        match.awayTeamName,
+        matchStateLabels[match.state],
+      ],
+      matchSearch,
+    ),
+  );
 
   async function guard(action: () => Promise<unknown>, success?: string) {
     setError(null);
@@ -150,7 +168,19 @@ export default function AdminChampionshipPage() {
             {(teams ?? []).length === 0 ? (
               <p className="text-muted-foreground">Aucune équipe engagée.</p>
             ) : (
-              (teams ?? []).map((team) => (
+              <Input
+                type="search"
+                value={teamSearch}
+                onChange={(event) => setTeamSearch(event.target.value)}
+                placeholder="Nom de l'équipe ou du club"
+                aria-label="Chercher une équipe engagée"
+                className="mb-2"
+              />
+            )}
+            {(teams ?? []).length > 0 && shownTeams.length === 0 ? (
+              <p className="text-muted-foreground">Aucune équipe ne correspond à cette recherche.</p>
+            ) : (
+              shownTeams.map((team) => (
                 <TeamAdminRow
                   key={team._id}
                   team={team}
@@ -406,7 +436,17 @@ export default function AdminChampionshipPage() {
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <div className="flex flex-col gap-1 text-sm">
-            {(matches ?? []).map((match) => (
+            {(matches ?? []).length === 0 ? null : (
+              <Input
+                type="search"
+                value={matchSearch}
+                onChange={(event) => setMatchSearch(event.target.value)}
+                placeholder="Équipe, journée (J3) ou état"
+                aria-label="Chercher un match"
+                className="mb-2"
+              />
+            )}
+            {shownMatches.map((match) => (
               <Link
                 key={match._id}
                 href={`/matchs/${match._id}`}
@@ -426,6 +466,8 @@ export default function AdminChampionshipPage() {
             ))}
             {(matches ?? []).length === 0 ? (
               <p className="text-muted-foreground">Aucun match programmé.</p>
+            ) : shownMatches.length === 0 ? (
+              <p className="text-muted-foreground">Aucun match ne correspond à cette recherche.</p>
             ) : null}
           </div>
 

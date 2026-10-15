@@ -26,6 +26,7 @@ import {
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { accountNotice } from "@/lib/account-notice";
+import { matchesTerm } from "@/lib/rules/player-search";
 import { uploadLogo } from "@/lib/upload-logo";
 
 export default function ClubsPage() {
@@ -40,6 +41,17 @@ export default function ClubsPage() {
   const [newLogo, setNewLogo] = useState<File | null>(null);
   const [openClub, setOpenClub] = useState<Id<"clubs"> | null>(null);
   const players = useQuery(api.players.listByClub, openClub ? { clubId: openClub } : "skip");
+  const [clubSearch, setClubSearch] = useState("");
+  const [playerSearch, setPlayerSearch] = useState("");
+  const shownClubs = (clubs ?? []).filter((club) =>
+    matchesTerm([club.name, club.defaultVenue], clubSearch),
+  );
+  const shownPlayers = (players ?? []).filter((player) =>
+    matchesTerm(
+      [player.lastName, player.firstName, player.license.number ?? "", player.email ?? ""],
+      playerSearch,
+    ),
+  );
 
   async function guard(action: () => Promise<unknown>) {
     setError(null);
@@ -142,7 +154,19 @@ export default function ClubsPage() {
       </Card>
 
       <div className="mt-6 flex flex-col gap-3">
-        {(clubs ?? []).map((club) => (
+        <Input
+          type="search"
+          value={clubSearch}
+          onChange={(event) => setClubSearch(event.target.value)}
+          placeholder="Nom du club ou salle"
+          aria-label="Chercher un club"
+        />
+        {clubs !== undefined && shownClubs.length === 0 ? (
+          <p className="text-muted-foreground text-sm">
+            {clubSearch.trim() === "" ? "Aucun club." : "Aucun club ne correspond à cette recherche."}
+          </p>
+        ) : null}
+        {shownClubs.map((club) => (
           <Card key={club._id}>
             <CardHeader>
               <CardTitle className="text-base">
@@ -183,14 +207,24 @@ export default function ClubsPage() {
                 <Button
                   type="button"
                   variant="ghost"
-                  onClick={() => setOpenClub(openClub === club._id ? null : club._id)}
+                  onClick={() => {
+                    setOpenClub(openClub === club._id ? null : club._id);
+                    setPlayerSearch("");
+                  }}
                 >
                   {openClub === club._id ? "Masquer les licenciés" : "Licenciés"}
                 </Button>
               </form>
 
               {openClub !== club._id ? null : (
-                <div>
+                <div className="flex flex-col gap-3">
+                  <Input
+                    type="search"
+                    value={playerSearch}
+                    onChange={(event) => setPlayerSearch(event.target.value)}
+                    placeholder="Nom, numéro de licence ou e-mail"
+                    aria-label={`Chercher un licencié de ${club.name}`}
+                  />
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -200,7 +234,7 @@ export default function ClubsPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {(players ?? []).map((player) => (
+                      {shownPlayers.map((player) => (
                         <TableRow key={player._id}>
                           <TableCell className="font-medium">
                             {player.lastName.toUpperCase()} {player.firstName}
@@ -215,12 +249,16 @@ export default function ClubsPage() {
                       ))}
                     </TableBody>
                   </Table>
-                  {(players ?? []).length === 0 ? (
-                    <p className="text-muted-foreground text-sm">Aucun licencié enregistré.</p>
+                  {players !== undefined && shownPlayers.length === 0 ? (
+                    <p className="text-muted-foreground text-sm">
+                      {playerSearch.trim() === ""
+                        ? "Aucun licencié enregistré."
+                        : "Aucun licencié ne correspond à cette recherche."}
+                    </p>
                   ) : null}
 
                   <form
-                    className="mt-4 flex flex-wrap items-end gap-3"
+                    className="mt-1 flex flex-wrap items-end gap-3"
                     onSubmit={async (event) => {
                       event.preventDefault();
                       const form = new FormData(event.currentTarget);
