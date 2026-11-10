@@ -179,8 +179,15 @@ Un report (salle indisponible, intempéries) est **demandé avec un motif** par 
 responsables et **accepté par l'autre** ; en cas de refus, le créneau tient. Un administrateur peut
 imposer un report. Le match retourne à l'étape 1 et n'entre pas au classement.
 
-**Après l'heure du créneau, plus de report possible** : soit une feuille de match est saisie, soit
-l'administrateur prononce un forfait.
+Le report reste possible **après l'heure du créneau**, tant qu'aucune feuille n'est saisie : un
+match annulé le jour même (gymnase fermé, neige) se signale ainsi, au lieu de rester « confirmé »
+à une date passée sans qu'on sache s'il a été joué. Si le receveur saisit finalement la feuille,
+ou si l'administrateur prononce un forfait, la demande en attente devient **sans objet**
+(`cancelled`).
+
+Un match reporté **le reste à l'affichage** : la demande garde le créneau annulé
+(`previousSlot`), et toute liste de matchs — bilan d'équipe, calendrier — montre « Reporté » tant
+qu'aucun créneau n'est reproposé, puis « Reporté, initialement le … » une fois reprogrammé.
 
 ### Autorisations
 
@@ -456,8 +463,9 @@ fiche Joueur n'a pas besoin de compte — la plupart n'en auront jamais.
 
 ## Périmètre public
 
-- **Lisible sans compte** : calendrier avec date, heure et lieu ; classements ; et, pour un match
-  **terminé**, le score set par set et le nom des joueurs alignés.
+- **Lisible sans compte** : calendrier avec date, heure et lieu — et, pour un match reporté, le
+  fait qu'il l'a été et la date annulée ; classements ; et, pour un match **terminé**, le score
+  set par set et le nom des joueurs alignés.
 - **Réservé aux comptes connectés** : les effectifs (les licenciés qui n'ont pas joué), les fiches
   joueur, et tout le déroulé administratif d'un match — propositions, motifs de report, motif de
   contestation, échéances.

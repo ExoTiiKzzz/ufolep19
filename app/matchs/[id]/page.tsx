@@ -38,8 +38,9 @@ import {
 } from "@/lib/format";
 import {
   matchdayNoun,
-  matchStateLabels,
+  matchStateLabel,
   matchStateVariant,
+  postponementNote,
   postponementStatusLabels,
   proposalStatusLabels,
 } from "@/lib/labels";
@@ -259,14 +260,19 @@ export default function MatchPage() {
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <Badge variant={matchStateVariant[match.state]}>
           {/* Un plateau n'a pas de créneau négocié : confirmé veut dire « à jouer ». */}
-          {isPlateau && match.state === "confirmed" ? "À jouer" : matchStateLabels[match.state]}
+          {isPlateau && match.state === "confirmed" ? "À jouer" : matchStateLabel(match)}
         </Badge>
         {match.slot === undefined ? (
-          <span className="text-muted-foreground text-sm">Créneau à fixer</span>
+          match.postponement === undefined ? (
+            <span className="text-muted-foreground text-sm">Créneau à fixer</span>
+          ) : null
         ) : (
           <span className="text-sm">
             {formatDateTime(match.slot.at)} · {match.slot.venue}
           </span>
+        )}
+        {postponementNote(match) === null ? null : (
+          <span className="text-muted-foreground text-sm">{postponementNote(match)}</span>
         )}
         {/* Signalement du déroulé administratif (ADR-0006) : pas pour le public. */}
         {history?.slotOutsideWindow ? (
@@ -468,13 +474,28 @@ export default function MatchPage() {
             </Card>
           ) : null}
 
-          {match.state === "confirmed" && !playable && !isPlateau ? (
+          {match.state === "confirmed" && !isPlateau && pendingPostponement?.requestedByMe ? (
+            <p className="text-muted-foreground mt-6 text-sm">
+              Report demandé : « {pendingPostponement.reason} ». En attente de la réponse de
+              l&apos;adversaire.
+            </p>
+          ) : null}
+
+          {/*
+           * Aussi après l'heure du match, tant qu'aucune feuille n'est saisie : un match
+           * annulé le jour même se signale reporté, au lieu de rester « confirmé » à une date
+           * passée sans qu'on sache s'il a été joué.
+           */}
+          {match.state === "confirmed" && !isPlateau && pendingPostponement === undefined ? (
             <Card className="mt-6">
               <CardHeader>
-                <CardTitle className="text-base">Demander un report</CardTitle>
+                <CardTitle className="text-base">
+                  {playable ? "Le match n'a pas eu lieu ? Signaler un report" : "Demander un report"}
+                </CardTitle>
                 <CardDescription>
-                  L&apos;adversaire devra l&apos;accepter. Après l&apos;heure du match, un report
-                  n&apos;est plus possible.
+                  {playable
+                    ? "S'il n'a pas été joué à la date prévue, indiquez pourquoi. L'adversaire devra confirmer, puis le receveur proposera un nouveau créneau."
+                    : "L'adversaire devra l'accepter."}
                 </CardDescription>
               </CardHeader>
               <CardContent>

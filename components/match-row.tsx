@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import type { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { formatDateTime, formatSets } from "@/lib/format";
-import { matchStateLabels, matchStateVariant } from "@/lib/labels";
+import { matchStateLabel, matchStateVariant, postponementNote } from "@/lib/labels";
 
 type Match = FunctionReturnType<typeof api.matches.listByChampionship>[number];
 
@@ -27,6 +27,15 @@ export function MatchRow({
 }) {
   const emphasis = (teamId: Id<"teams">) =>
     teamId === highlightTeamId ? "font-semibold" : "font-medium";
+
+  const details: string[] = [];
+  if (match.slot !== undefined) {
+    details.push(`${formatDateTime(match.slot.at)} · ${match.slot.venue}`);
+  }
+  const note = postponementNote(match);
+  if (note !== null) {
+    details.push(note);
+  }
 
   return (
     <Link
@@ -56,21 +65,21 @@ export function MatchRow({
           </span>
         )}
         <Badge variant={matchStateVariant[match.state]} className="ml-auto">
-          {matchStateLabels[match.state]}
+          {matchStateLabel(match)}
         </Badge>
       </span>
       {/*
-       * Sans créneau, rien dessous : le badge « Créneau à fixer » le dit déjà. Sur un
-       * téléphone, la ligne garde alors seulement le numéro de journée.
+       * Dessous : le créneau, puis la mention du report. Sans l'un ni l'autre, rien — le
+       * badge « Créneau à fixer » le dit déjà —, sauf sur un téléphone le numéro de journée.
        */}
-      {match.slot === undefined ? (
+      {details.length === 0 ? (
         showMatchday ? (
           <span className="text-muted-foreground sm:hidden">J{match.matchdayNumber}</span>
         ) : null
       ) : (
         <span className={showMatchday ? "text-muted-foreground sm:pl-11" : "text-muted-foreground"}>
           {showMatchday ? <span className="sm:hidden">J{match.matchdayNumber} · </span> : null}
-          {formatDateTime(match.slot.at)} · {match.slot.venue}
+          {details.join(" · ")}
         </span>
       )}
     </Link>

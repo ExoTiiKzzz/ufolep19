@@ -177,7 +177,9 @@ _Avoid_: abandon, absence, walkover
 **Report** (`postponement`):
 Annulation du créneau d'un match confirmé sans qu'il soit joué (salle indisponible, intempéries).
 Demandé avec un motif par l'un des deux responsables et accepté par l'autre, ou imposé par un
-administrateur. Le match retourne en négociation de créneau et n'entre pas au classement.
+administrateur — avant comme après l'heure du créneau, tant qu'aucune feuille n'est saisie. Le
+match retourne en négociation de créneau, n'entre pas au classement, et reste affiché
+« Reporté » avec sa date initiale.
 _Avoid_: annulation, décalage, remise
 
 **Feuille de match** (`matchSheet`):

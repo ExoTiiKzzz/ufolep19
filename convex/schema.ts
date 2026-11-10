@@ -25,6 +25,18 @@ export const slot = v.object({
 });
 
 /**
+ * Sort d'une demande de report. `cancelled` : le match a été joué, ou tranché par un
+ * forfait, avant qu'on y réponde — la demande n'a plus d'objet.
+ */
+export const postponementStatus = v.union(
+  v.literal("pending"),
+  v.literal("accepted"),
+  v.literal("rejected"),
+  v.literal("imposed"),
+  v.literal("cancelled"),
+);
+
+/**
  * Format d'un championnat : règles de score et de classement. Indépendant du circuit.
  * `standard` : meilleur des 5 sets. `plateau` : 2 sets secs, match nul possible.
  */
@@ -244,17 +256,15 @@ export default defineSchema({
     respondedAt: v.optional(v.number()),
   }).index("by_match", ["matchId"]),
 
-  // Demande de report d'un match confirmé.
+  // Demande de report d'un match confirmé, avant ou après l'heure du créneau.
   postponementRequests: defineTable({
     matchId: v.id("matches"),
     requestedBy: v.id("users"),
     reason: v.string(),
-    status: v.union(
-      v.literal("pending"),
-      v.literal("accepted"),
-      v.literal("rejected"),
-      v.literal("imposed"),
-    ),
+    status: postponementStatus,
+    // Le créneau que le report annule : le match l'efface, la demande le garde pour qu'on
+    // lise « reporté, initialement le … ». Absent des demandes antérieures à ce champ.
+    previousSlot: v.optional(slot),
   }).index("by_match", ["matchId"]),
 
   // Feuille de match : score par set et compositions des deux équipes. Unique par match,

@@ -18,6 +18,7 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 import { managedTeamIds, requireAdmin, requireUser } from "./authz";
+import { postponementStatus } from "./schema";
 import { accountName } from "./users";
 
 type Ctx = QueryCtx | MutationCtx;
@@ -271,7 +272,13 @@ export const applyTacitSlot = internalMutation({
   },
 });
 
-/** Un responsable demande le report d'un match confirmé, avec un motif. */
+/**
+ * Un responsable demande le report d'un match confirmé, avec un motif.
+ *
+ * Aussi **après** l'heure du créneau, tant qu'aucune feuille n'est saisie : un match
+ * annulé le jour même (gymnase fermé, neige) doit pouvoir se dire reporté, faute de quoi
+ * il resterait « confirmé » à une date passée et personne ne saurait s'il a été joué.
+ */
 export const requestPostponement = mutation({
   args: { matchId: v.id("matches"), reason: v.string() },
   returns: v.null(),
@@ -282,7 +289,6 @@ export const requestPostponement = mutation({
     if (match.state !== "confirmed") {
       throw new ConvexError("Seul un match dont le créneau est ferme peut être reporté.");
     }
-    assertBeforeSlot(match);
     if (reason.trim() === "") {
       throw new ConvexError("Le motif du report est obligatoire.");
     }
@@ -294,6 +300,7 @@ export const requestPostponement = mutation({
       requestedBy: sides.user._id,
       reason: reason.trim(),
       status: "pending",
+      previousSlot: match.slot,
     });
     return null;
   },
@@ -313,7 +320,6 @@ export const respondToPostponement = mutation({
     if (request.requestedBy === sides.user._id && !sides.isAdmin) {
       throw new ConvexError("Vous ne pouvez pas accepter votre propre demande de report.");
     }
-    assertBeforeSlot(match);
 
     if (!accept) {
       await ctx.db.patch(request._id, { status: "rejected" });
@@ -337,7 +343,6 @@ export const imposePostponement = mutation({
     const match = await mustGetMatch(ctx, matchId);
     await assertNegotiable(ctx, match);
     const to = transitionTo("postpone", match.state, "admin");
-    assertBeforeSlot(match);
 
     const request = await pendingPostponement(ctx, matchId);
     if (request !== null) {
@@ -348,6 +353,7 @@ export const imposePostponement = mutation({
       requestedBy: admin._id,
       reason: reason.trim() === "" ? "Report imposé par le comité." : reason.trim(),
       status: "imposed",
+      previousSlot: match.slot,
     });
     await cancelTacit(ctx, match);
     await ctx.db.patch(matchId, { state: to, slot: undefined, tacitJobId: undefined });
@@ -409,18 +415,6 @@ export const fixSlot = mutation({
   },
 });
 
-/**
- * Passé l'heure du créneau, plus de report : soit une feuille de match est saisie, soit
- * l'administrateur prononce un forfait.
- */
-function assertBeforeSlot(match: Doc<"matches">) {
-  if (match.slot !== undefined && Date.now() >= match.slot.at) {
-    throw new ConvexError(
-      "L'heure du match est passée : un report n'est plus possible, il faut saisir la feuille ou prononcer un forfait.",
-    );
-  }
-}
-
 /** Salle par défaut du club receveur. */
 async function homeVenue(ctx: Ctx, match: Doc<"matches">): Promise<string> {
   const team = await ctx.db.get(match.homeTeamId);
@@ -457,12 +451,7 @@ export const history = query({
         _id: v.id("postponementRequests"),
         requestedByName: v.string(),
         reason: v.string(),
-        status: v.union(
-          v.literal("pending"),
-          v.literal("accepted"),
-          v.literal("rejected"),
-          v.literal("imposed"),
-        ),
+        status: postponementStatus,
         requestedByMe: v.boolean(),
       }),
     ),

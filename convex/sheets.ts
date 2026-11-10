@@ -241,8 +241,19 @@ function playedSlot(
   return slot;
 }
 
-/** Une négociation encore ouverte n'a plus d'objet une fois le match joué : on la clôt. */
+/**
+ * Une négociation encore ouverte n'a plus d'objet une fois le match joué ou tranché : on
+ * la clôt. Une demande de report en attente aussi — le report se demande après l'heure du
+ * créneau, et le receveur peut saisir la feuille avant que l'adversaire ait répondu.
+ */
 async function closeNegotiation(ctx: MutationCtx, match: Doc<"matches">) {
+  const requests = await ctx.db
+    .query("postponementRequests")
+    .withIndex("by_match", (q) => q.eq("matchId", match._id))
+    .collect();
+  for (const request of requests.filter((row) => row.status === "pending")) {
+    await ctx.db.patch(request._id, { status: "cancelled" });
+  }
   if (match.state !== "planned" && match.state !== "awaitingSlot") {
     return;
   }
@@ -475,6 +486,7 @@ export const forfeit = mutation({
       homeForfeits ? { home: set.away, away: set.home } : set,
     );
     const result = resultFrom(match, sets, format);
+    await closeNegotiation(ctx, match);
 
     if (match.tacitJobId !== undefined) {
       await ctx.scheduler.cancel(match.tacitJobId);

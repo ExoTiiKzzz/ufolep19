@@ -28,7 +28,7 @@ import {
   formatLabels,
   levelLabel,
   matchdayNoun,
-  matchStateLabels,
+  matchStateLabel,
   matchStateVariant,
 } from "@/lib/labels";
 import { roundCount } from "@/lib/rules/bracket";
@@ -79,7 +79,8 @@ export default function AdminChampionshipPage() {
         `J${match.matchdayNumber}`,
         match.homeTeamName,
         match.awayTeamName,
-        matchStateLabels[match.state],
+        matchStateLabel(match),
+        match.postponement === undefined ? "" : "reporté",
       ],
       matchSearch,
     ),
@@ -459,8 +460,11 @@ export default function AdminChampionshipPage() {
                 {match.slot === undefined ? null : (
                   <span className="text-muted-foreground">{formatDateTime(match.slot.at)}</span>
                 )}
+                {match.postponement === undefined || match.state === "planned" ? null : (
+                  <span className="text-muted-foreground">(reporté)</span>
+                )}
                 <Badge variant={matchStateVariant[match.state]} className="ml-auto">
-                  {matchStateLabels[match.state]}
+                  {matchStateLabel(match)}
                 </Badge>
               </Link>
             ))}

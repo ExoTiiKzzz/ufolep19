@@ -455,28 +455,6 @@ test("un responsable ne peut pas imposer de report", async () => {
   ).rejects.toThrow(/réservée aux administrateurs/i);
 });
 
-test("aucun report n'est possible après l'heure du match", async () => {
-  at(BEFORE_WINDOW);
-  const t = convexTest(schema, modules);
-  const s = await setupChampionship(t);
-  await forceConfirmed(t, { matchId: s.matchId, proposedBy: s.homeManager });
-
-  vi.setSystemTime(new Date(SLOT_AT + 3_600_000));
-
-  await expect(
-    t.withIdentity({ subject: s.homeManager }).mutation(api.negotiation.requestPostponement, {
-      matchId: s.matchId,
-      reason: "Trop tard.",
-    }),
-  ).rejects.toThrow(/heure du match est passée/i);
-  await expect(
-    t.withIdentity({ subject: s.admin }).mutation(api.negotiation.imposePostponement, {
-      matchId: s.matchId,
-      reason: "Trop tard aussi.",
-    }),
-  ).rejects.toThrow(/heure du match est passée/i);
-});
-
 test("le tableau de bord liste ce qui attend chaque responsable", async () => {
   at(BEFORE_WINDOW);
   const t = convexTest(schema, modules);

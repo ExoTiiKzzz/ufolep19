@@ -25,6 +25,9 @@ export const matchSummary = v.object({
   slot: v.optional(slot),
   result: v.optional(matchResult),
   forfeitAgainst: v.optional(v.id("teams")),
+  // Dernier report effectif. Public : le fait et la date annulée relèvent du calendrier ;
+  // le motif et le demandeur, du déroulé administratif (`negotiation.history`).
+  postponement: v.optional(v.object({ previousAt: v.optional(v.number()) })),
 });
 
 /**
@@ -69,10 +72,11 @@ export async function summarize(
   match: Doc<"matches">,
   cache: TeamCache = newTeamCache(),
 ) {
-  const [matchday, home, away] = await Promise.all([
+  const [matchday, home, away, postponement] = await Promise.all([
     ctx.db.get(match.matchdayId),
     presentTeam(ctx, match.homeTeamId, cache),
     presentTeam(ctx, match.awayTeamId, cache),
+    lastPostponement(ctx, match._id),
   ]);
   return {
     _id: match._id,
@@ -93,7 +97,22 @@ export async function summarize(
     slot: match.slot,
     result: match.result,
     forfeitAgainst: match.forfeitAgainst,
+    postponement:
+      postponement === null ? undefined : { previousAt: postponement.previousSlot?.at },
   };
+}
+
+/** Le dernier report accepté ou imposé d'un match, `null` s'il n'a jamais été reporté. */
+async function lastPostponement(ctx: QueryCtx, matchId: Id<"matches">) {
+  const requests = await ctx.db
+    .query("postponementRequests")
+    .withIndex("by_match", (q) => q.eq("matchId", matchId))
+    .order("desc")
+    .collect();
+  return (
+    requests.find((request) => request.status === "accepted" || request.status === "imposed") ??
+    null
+  );
 }
 
 /** Tous les matchs d'un championnat. Lecture publique : aucune donnée nominative. */
